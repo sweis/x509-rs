@@ -4,3 +4,6 @@
 [submodule "tests/x509-limbo"]
 	path = tests/x509-limbo
 	url = https://github.com/C2SP/x509-limbo
+[submodule "testdata/pyca-cryptography"]
+	path = testdata/pyca-cryptography
+	url = https://github.com/pyca/cryptography.git
