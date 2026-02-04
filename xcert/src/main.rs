@@ -2,8 +2,9 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use rayon::prelude::*;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Parser)]
@@ -123,7 +124,7 @@ enum Commands {
         check: CheckType,
         /// Value to check (duration for expiry, hostname/email/IP for others)
         value: String,
-        /// Certificate file. Reads from stdin if omitted.
+        /// Certificate file or directory. Reads from stdin if omitted.
         file: Option<PathBuf>,
         /// Force DER input parsing (default: auto-detect)
         #[arg(long)]
@@ -131,6 +132,12 @@ enum Commands {
         /// Force PEM input parsing (default: auto-detect)
         #[arg(long)]
         pem: bool,
+        /// Only print failures (directory mode)
+        #[arg(long)]
+        failures_only: bool,
+        /// Recurse into subdirectories (directory mode)
+        #[arg(short, long)]
+        recurse: bool,
     },
     /// Convert between PEM and DER formats
     #[command(
@@ -178,7 +185,7 @@ enum Commands {
                       \n  cat chain.pem | xcert verify"
     )]
     Verify {
-        /// PEM file with certificate chain (leaf first, then intermediates).
+        /// PEM file or directory with certificate chain(s).
         /// Reads from stdin if omitted.
         file: Option<PathBuf>,
         /// Hostname to verify against the leaf certificate's SAN/CN
@@ -229,6 +236,12 @@ enum Commands {
         /// Output in JSON format
         #[arg(long)]
         json: bool,
+        /// Only print failures (directory mode)
+        #[arg(long)]
+        failures_only: bool,
+        /// Recurse into subdirectories (directory mode)
+        #[arg(short, long)]
+        recurse: bool,
     },
 }
 
@@ -309,6 +322,65 @@ fn parse_duration(s: &str) -> Result<Duration> {
         return Ok(Duration::from_secs(secs));
     }
     humantime::parse_duration(s).with_context(|| format!("Invalid duration: '{s}'"))
+}
+
+/// Check if a path has a certificate file extension (.pem or .der).
+fn is_cert_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some(ext) if ext.eq_ignore_ascii_case("pem") || ext.eq_ignore_ascii_case("der")
+            || ext.eq_ignore_ascii_case("crt") || ext.eq_ignore_ascii_case("cer")
+    )
+}
+
+/// Find all certificate files (.pem, .der, .crt, .cer) in a directory.
+fn find_cert_files(dir: &Path, recurse: bool) -> Vec<PathBuf> {
+    let walker = if recurse {
+        walkdir::WalkDir::new(dir)
+    } else {
+        walkdir::WalkDir::new(dir).max_depth(1)
+    };
+    let mut files: Vec<PathBuf> = walker
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file() && is_cert_file(e.path()))
+        .map(|e| e.into_path())
+        .collect();
+    files.sort();
+    files
+}
+
+/// A single result from batch processing.
+struct BatchResult {
+    path: String,
+    pass: bool,
+    detail: String,
+}
+
+/// Process certificate files in parallel, printing `filename: result`.
+///
+/// Returns the number of failures.
+fn run_batch<F>(files: &[PathBuf], failures_only: bool, op: F) -> usize
+where
+    F: Fn(&Path) -> BatchResult + Sync,
+{
+    let results: Vec<BatchResult> = files.par_iter().map(|f| op(f)).collect();
+
+    let mut failures = 0;
+    for r in &results {
+        if !r.pass {
+            failures += 1;
+        }
+        if failures_only && r.pass {
+            continue;
+        }
+        if r.pass {
+            println!("{}: {}", r.path, r.detail);
+        } else {
+            eprintln!("{}: {}", r.path, r.detail);
+        }
+    }
+    failures
 }
 
 fn main() -> Result<()> {
@@ -449,7 +521,77 @@ fn main() -> Result<()> {
             file,
             der,
             pem,
+            failures_only,
+            recurse,
         } => {
+            // Directory mode: process all cert files in parallel
+            if let Some(path) = file {
+                if path.is_dir() {
+                    let files = find_cert_files(path, *recurse);
+                    if files.is_empty() {
+                        anyhow::bail!(
+                            "No certificate files (.pem, .der, .crt, .cer) found in {}",
+                            path.display()
+                        );
+                    }
+                    // Pre-parse duration once for expiry checks
+                    let expiry_secs = if matches!(check, CheckType::Expiry) {
+                        Some(parse_duration(value)?.as_secs())
+                    } else {
+                        None
+                    };
+                    let check_type = check.clone();
+                    let check_value = value.clone();
+                    let force_der = *der;
+                    let force_pem = *pem;
+                    let failures = run_batch(&files, *failures_only, |f| {
+                        let label = f.display().to_string();
+                        let data = match std::fs::read(f) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                return BatchResult {
+                                    path: label,
+                                    pass: false,
+                                    detail: format!("FAIL (read error: {})", e),
+                                }
+                            }
+                        };
+                        let cert = match parse_input(&data, force_der, force_pem) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return BatchResult {
+                                    path: label,
+                                    pass: false,
+                                    detail: format!("FAIL (parse error: {})", e),
+                                }
+                            }
+                        };
+                        let pass = match check_type {
+                            CheckType::Expiry => {
+                                xcert_lib::check_expiry(&cert, expiry_secs.unwrap_or(0))
+                            }
+                            CheckType::Host => xcert_lib::check_host(&cert, &check_value),
+                            CheckType::Email => xcert_lib::check_email(&cert, &check_value),
+                            CheckType::Ip => xcert_lib::check_ip(&cert, &check_value),
+                        };
+                        BatchResult {
+                            path: label,
+                            pass,
+                            detail: if pass {
+                                "PASS".to_string()
+                            } else {
+                                "FAIL".to_string()
+                            },
+                        }
+                    });
+                    if failures > 0 {
+                        std::process::exit(1);
+                    }
+                    return Ok(());
+                }
+            }
+
+            // Single file mode
             let input = read_input(file.as_ref())?;
             let cert = parse_input(&input, *der, *pem)?;
 
@@ -545,9 +687,10 @@ fn main() -> Result<()> {
             crl_check,
             crl_check_all,
             json,
+            failures_only,
+            recurse,
         } => {
-            let input = read_input(file.as_ref())?;
-
+            // Build shared trust store and options (used by both modes)
             let mut trust_store = if let Some(ca_file_path) = ca_file {
                 xcert_lib::TrustStore::from_pem_file(ca_file_path)?
             } else {
@@ -558,14 +701,12 @@ fn main() -> Result<()> {
                 trust_store.add_pem_directory(ca_dir)?;
             }
 
-            // Validate: --crl-check or --crl-check-all requires --CRLfile
             if (*crl_check || *crl_check_all) && crl_file.is_none() {
                 anyhow::bail!(
                     "--crl-check and --crl-check-all require --CRLfile to specify a CRL file"
                 );
             }
 
-            // Load CRL file if provided
             let crl_ders = if let Some(crl_path) = crl_file {
                 let crl_data = std::fs::read(crl_path)
                     .with_context(|| format!("Failed to read CRL file: {}", crl_path.display()))?;
@@ -574,7 +715,6 @@ fn main() -> Result<()> {
                 Vec::new()
             };
 
-            // Resolve named purposes (sslserver, sslclient, etc.) to OIDs
             let resolved_purpose = purpose.as_ref().map(|p| {
                 xcert_lib::resolve_purpose(p)
                     .map(|s| s.to_string())
@@ -594,8 +734,88 @@ fn main() -> Result<()> {
                 crl_check_all: *crl_check_all,
             };
 
+            // Directory mode: verify all cert files in parallel
+            if let Some(path) = file {
+                if path.is_dir() {
+                    let files = find_cert_files(path, *recurse);
+                    if files.is_empty() {
+                        anyhow::bail!(
+                            "No certificate files (.pem, .der, .crt, .cer) found in {}",
+                            path.display()
+                        );
+                    }
+                    let failures = run_batch(&files, *failures_only, |f| {
+                        let label = f.display().to_string();
+                        let data = match std::fs::read(f) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                return BatchResult {
+                                    path: label,
+                                    pass: false,
+                                    detail: format!("FAIL (read error: {})", e),
+                                }
+                            }
+                        };
+                        let result = if let Some(untrusted_path) = untrusted {
+                            let leaf_der = match xcert_lib::pem_to_der(&data) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    return BatchResult {
+                                        path: label,
+                                        pass: false,
+                                        detail: format!("FAIL (parse error: {})", e),
+                                    }
+                                }
+                            };
+                            let untrusted_data = match std::fs::read(untrusted_path) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    return BatchResult {
+                                        path: label,
+                                        pass: false,
+                                        detail: format!("FAIL (read untrusted: {})", e),
+                                    }
+                                }
+                            };
+                            xcert_lib::verify_with_untrusted(
+                                &leaf_der,
+                                &untrusted_data,
+                                &trust_store,
+                                hostname.as_deref(),
+                                &options,
+                            )
+                        } else {
+                            xcert_lib::verify_pem_chain_with_options(
+                                &data,
+                                &trust_store,
+                                hostname.as_deref(),
+                                &options,
+                            )
+                        };
+                        match result {
+                            Ok(r) => BatchResult {
+                                path: label,
+                                pass: r.is_valid,
+                                detail: format!("{}", r),
+                            },
+                            Err(e) => BatchResult {
+                                path: label,
+                                pass: false,
+                                detail: format!("FAIL ({})", e),
+                            },
+                        }
+                    });
+                    if failures > 0 {
+                        std::process::exit(2);
+                    }
+                    return Ok(());
+                }
+            }
+
+            // Single file mode
+            let input = read_input(file.as_ref())?;
+
             let result = if let Some(untrusted_path) = untrusted {
-                // Separate leaf + untrusted intermediates (like openssl verify -untrusted)
                 let leaf_der = xcert_lib::pem_to_der(&input)?;
                 let untrusted_data = std::fs::read(untrusted_path).with_context(|| {
                     format!(
@@ -805,5 +1025,93 @@ mod tests {
     #[test]
     fn reject_unit_only_no_number() {
         assert!(parse_duration("hours").is_err());
+    }
+
+    // ---- is_cert_file tests ----
+
+    #[test]
+    fn is_cert_file_pem() {
+        assert!(is_cert_file(Path::new("cert.pem")));
+    }
+
+    #[test]
+    fn is_cert_file_der() {
+        assert!(is_cert_file(Path::new("cert.der")));
+    }
+
+    #[test]
+    fn is_cert_file_crt() {
+        assert!(is_cert_file(Path::new("cert.crt")));
+    }
+
+    #[test]
+    fn is_cert_file_cer() {
+        assert!(is_cert_file(Path::new("cert.cer")));
+    }
+
+    #[test]
+    fn is_cert_file_case_insensitive() {
+        assert!(is_cert_file(Path::new("cert.PEM")));
+        assert!(is_cert_file(Path::new("cert.DER")));
+    }
+
+    #[test]
+    fn is_cert_file_rejects_non_cert() {
+        assert!(!is_cert_file(Path::new("cert.txt")));
+        assert!(!is_cert_file(Path::new("cert.json")));
+        assert!(!is_cert_file(Path::new("cert.key")));
+        assert!(!is_cert_file(Path::new("README.md")));
+    }
+
+    #[test]
+    fn is_cert_file_rejects_no_extension() {
+        assert!(!is_cert_file(Path::new("cert")));
+    }
+
+    // ---- find_cert_files tests ----
+
+    #[test]
+    fn find_cert_files_finds_pem_and_der() {
+        let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/certs");
+        let files = find_cert_files(&certs_dir, false);
+        assert!(!files.is_empty(), "should find cert files in tests/certs");
+        // All returned files should have cert extensions
+        for f in &files {
+            assert!(is_cert_file(f), "non-cert file returned: {}", f.display());
+        }
+    }
+
+    #[test]
+    fn find_cert_files_sorted() {
+        let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/certs");
+        let files = find_cert_files(&certs_dir, false);
+        let mut sorted = files.clone();
+        sorted.sort();
+        assert_eq!(files, sorted, "files should be sorted");
+    }
+
+    #[test]
+    fn find_cert_files_non_recursive_skips_subdirs() {
+        let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/certs");
+        let flat = find_cert_files(&certs_dir, false);
+        // None of the flat results should be inside a subdirectory beyond certs/
+        for f in &flat {
+            let relative = f.strip_prefix(&certs_dir).unwrap();
+            assert_eq!(
+                relative.components().count(),
+                1,
+                "non-recursive should only return direct children: {}",
+                f.display()
+            );
+        }
+    }
+
+    #[test]
+    fn find_cert_files_empty_dir() {
+        let tmp = std::env::temp_dir().join("xcert_test_empty_dir");
+        let _ = std::fs::create_dir(&tmp);
+        let files = find_cert_files(&tmp, false);
+        assert!(files.is_empty(), "empty dir should return no files");
+        let _ = std::fs::remove_dir(&tmp);
     }
 }
