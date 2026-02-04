@@ -276,7 +276,7 @@ fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> String {
     let oid_der = spki.algorithm.algorithm.to_der_vec().unwrap_or_default();
     let params_der = match &spki.algorithm.parameters {
         Some(any) => any.to_der_vec().unwrap_or_else(|_| vec![0x05, 0x00]),
-        None => vec![0x05, 0x00], // explicit NULL
+        None => Vec::new(), // absent parameters (e.g. EdDSA per RFC 8410)
     };
     let algo_body_len = oid_der.len() + params_der.len();
 

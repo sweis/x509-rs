@@ -30,18 +30,6 @@ fn load_cert(name: &str) -> Vec<u8> {
     })
 }
 
-fn load_reference(name: &str) -> String {
-    let mut p = cert_path("reference");
-    p.pop();
-    p.push("reference");
-    p.push(name);
-    std::fs::read_to_string(&p).unwrap_or_else(|e| {
-        panic!(
-            "Failed to read reference file '{}': {}. Run tests/certs/generate.sh first.",
-            name, e
-        )
-    })
-}
 
 // =========================================================================
 // 1. PARSING TESTS
@@ -2119,5 +2107,520 @@ mod verification {
             !result.is_valid,
             "test chain should not verify against system store (custom root CA)"
         );
+    }
+}
+
+// ===========================================================================
+// Cross-compatibility tests using public test vectors
+// ===========================================================================
+//
+// Test certificates sourced from:
+//   - x509-parser (MIT/Apache-2.0): https://github.com/rusticata/x509-parser/tree/master/assets
+//   - OpenSSL (Apache-2.0): https://github.com/openssl/openssl/tree/master/test/certs
+//   - pyca/cryptography (Apache-2.0/BSD): https://github.com/pyca/cryptography
+//
+// Reference values extracted with `openssl x509` for cross-implementation verification.
+
+fn load_external(name: &str) -> Vec<u8> {
+    let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.pop();
+    p.push("tests");
+    p.push("certs");
+    p.push("external");
+    p.push(name);
+    std::fs::read(&p).unwrap_or_else(|e| {
+        panic!("Failed to read external test cert '{}': {}", name, e)
+    })
+}
+
+/// Helper: parse an external cert from PEM.
+fn parse_external_pem(name: &str) -> CertificateInfo {
+    let data = load_external(name);
+    parse_pem(&data).unwrap_or_else(|e| panic!("Failed to parse '{}': {}", name, e))
+}
+
+/// Helper: parse an external cert from DER.
+fn parse_external_der(name: &str) -> CertificateInfo {
+    let data = load_external(name);
+    parse_der(&data).unwrap_or_else(|e| panic!("Failed to parse '{}': {}", name, e))
+}
+
+mod cross_compat_openssl {
+    //! Tests against OpenSSL test suite certificates.
+    use super::*;
+
+    #[test]
+    fn ossl_rsa_root_ca() {
+        let cert = parse_external_pem("ossl-root-cert.pem");
+        assert_eq!(cert.version, 3);
+        assert!(cert.subject_string().contains("CN=Root CA"));
+        assert!(cert.issuer_string().contains("CN=Root CA"));
+        assert_eq!(cert.serial, "01");
+        assert_eq!(cert.public_key.algorithm, "RSA");
+        assert_eq!(cert.public_key.key_size, Some(2048));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "BB:84:C7:81:92:4C:01:36:5E:65:AE:27:CE:26:DF:D5:D4:B8:F2:FD:57:60:CD:27:D3:0F:E7:8E:5A:B7:3F:1A"
+        );
+    }
+
+    #[test]
+    fn ossl_rsa_root_pubkey_pem() {
+        let cert = parse_external_pem("ossl-root-cert.pem");
+        let pem = cert.public_key_pem();
+        assert!(pem.starts_with("-----BEGIN PUBLIC KEY-----"));
+        assert!(pem.contains("MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBC"));
+    }
+
+    #[test]
+    fn ossl_ecdsa_p256() {
+        let cert = parse_external_pem("ossl-server-ecdsa-cert.pem");
+        assert_eq!(cert.version, 3);
+        assert!(cert.subject_string().contains("CN=Server ECDSA cert"));
+        assert!(cert.issuer_string().contains("CN=Root CA"));
+        assert_eq!(cert.public_key.algorithm, "EC");
+        assert_eq!(cert.public_key.key_size, Some(256));
+        assert_eq!(cert.public_key.curve.as_deref(), Some("P-256"));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "E7:01:D8:30:25:6E:1B:E8:B2:0A:85:46:56:E6:C4:7A:38:37:BB:4E:59:B7:1D:8E:83:63:3B:15:EC:61:1D:3B"
+        );
+    }
+
+    #[test]
+    fn ossl_ecdsa_p256_pubkey_pem_matches_openssl() {
+        let cert = parse_external_pem("ossl-server-ecdsa-cert.pem");
+        let expected = "\
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4js03ETjze0nIgpPoo5AzlmV+uKC
+HXYERwfGfOm52BUdgDhovkPkm6VgYXMvQtDlDnkakK5vVXaP4CHIEwo9Cg==
+-----END PUBLIC KEY-----\n";
+        assert_eq!(cert.public_key_pem(), expected);
+    }
+
+    #[test]
+    fn ossl_ed25519() {
+        let cert = parse_external_pem("ossl-root-ed25519.pem");
+        assert_eq!(cert.version, 3);
+        assert!(cert.subject_string().contains("CN=IETF Test Demo"));
+        assert!(cert.issuer_string().contains("CN=IETF Test Demo"));
+        assert_eq!(cert.serial, "84:F1:08:3D:1C:E3:2D:95");
+        assert_eq!(cert.public_key.algorithm, "Ed25519");
+        assert_eq!(cert.public_key.key_size, Some(256));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "A5:8E:62:33:C6:61:0A:1F:B1:DE:35:EE:33:AD:57:A2:50:D1:FE:2B:E7:62:E1:41:50:E6:B9:3A:E2:25:80:A3"
+        );
+    }
+
+    #[test]
+    fn ossl_ed25519_pubkey_pem_matches_openssl() {
+        let cert = parse_external_pem("ossl-root-ed25519.pem");
+        let expected = "\
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
+-----END PUBLIC KEY-----\n";
+        assert_eq!(cert.public_key_pem(), expected);
+    }
+
+    #[test]
+    fn ossl_ed448() {
+        let cert = parse_external_pem("ossl-root-ed448-cert.pem");
+        assert_eq!(cert.version, 3);
+        assert!(cert.subject_string().contains("CN=Root Ed448"));
+        assert_eq!(cert.public_key.algorithm, "Ed448");
+        assert_eq!(cert.public_key.key_size, Some(448));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "6C:11:DC:C0:EE:96:65:07:17:D0:E9:16:08:D8:CF:BC:7A:26:C2:CF:57:CC:41:5F:B7:5A:94:9F:F1:20:AC:A9"
+        );
+    }
+
+    #[test]
+    fn ossl_ed448_pubkey_pem_matches_openssl() {
+        let cert = parse_external_pem("ossl-root-ed448-cert.pem");
+        let expected = "\
+-----BEGIN PUBLIC KEY-----
+MEMwBQYDK2VxAzoAbbhuwNA/rdlgdLSyTJ6WaCVNO1gzccKiKW6pCADMMcMBCNiQ
+qWSt4EIbHpqDc+eWoiKbG6t7tjUA
+-----END PUBLIC KEY-----\n";
+        assert_eq!(cert.public_key_pem(), expected);
+    }
+
+    #[test]
+    fn ossl_many_names_parses_without_panic() {
+        let cert = parse_external_pem("ossl-many-names1.pem");
+        assert_eq!(cert.version, 3);
+        assert!(cert.subject_string().contains("CN=t0.test"));
+        // This cert has 513 emailAddress attributes in the subject
+        let email_count = cert
+            .subject
+            .components
+            .iter()
+            .filter(|(k, _)| k == "emailAddress")
+            .count();
+        assert!(
+            email_count > 100,
+            "expected many emailAddress components, got {}",
+            email_count
+        );
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "CC:14:A3:C9:50:39:2F:32:49:A3:C6:7A:FA:66:8F:29:70:B4:45:03:6B:7A:6E:11:A6:3F:BF:C8:B6:3D:D2:97"
+        );
+    }
+}
+
+mod cross_compat_pyca {
+    //! Tests against pyca/cryptography test vectors.
+    use super::*;
+
+    #[test]
+    fn pyca_ecdsa_p384_root() {
+        let cert = parse_external_pem("pyca-ecdsa-root.pem");
+        assert_eq!(cert.version, 3);
+        assert!(cert.subject_string().contains("CN=DigiCert Global Root G3"));
+        assert_eq!(cert.public_key.algorithm, "EC");
+        assert_eq!(cert.public_key.key_size, Some(384));
+        assert_eq!(cert.public_key.curve.as_deref(), Some("P-384"));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "31:AD:66:48:F8:10:41:38:C7:38:F3:9E:A4:32:01:33:39:3E:3A:18:CC:02:29:6E:F9:7C:2A:C9:EF:67:31:D0"
+        );
+    }
+
+    #[test]
+    fn pyca_ecdsa_p384_pubkey_pem_matches_openssl() {
+        let cert = parse_external_pem("pyca-ecdsa-root.pem");
+        let expected = "\
+-----BEGIN PUBLIC KEY-----
+MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAE3afZu4q4C/sLfyHS8L6+c/MzXRq8NOre
+xpu80JX28MzQC7phW1FGfp4tn+6OYwwX7Adw9c+ELkCDnOg/QW07rdOkFFk2eJ0D
+Q+4QE2xy3q6Ip6FrtUPOZ9wj/wMco+I+
+-----END PUBLIC KEY-----\n";
+        assert_eq!(cert.public_key_pem(), expected);
+    }
+
+    #[test]
+    fn pyca_letsencrypt_x3() {
+        let cert = parse_external_pem("pyca-letsencrypt-x3.pem");
+        assert_eq!(cert.version, 3);
+        assert!(cert.subject_string().contains("CN=Let's Encrypt Authority X3"));
+        assert!(cert.issuer_string().contains("CN=DST Root CA X3"));
+        assert_eq!(cert.public_key.algorithm, "RSA");
+        assert_eq!(cert.public_key.key_size, Some(2048));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "25:84:7D:66:8E:B4:F0:4F:DD:40:B1:2B:6B:07:40:C5:67:DA:7D:02:43:08:EB:6C:2C:96:FE:41:D9:DE:21:8D"
+        );
+    }
+
+    #[test]
+    fn pyca_v1_cert() {
+        let cert = parse_external_pem("pyca-v1.pem");
+        assert_eq!(cert.version, 1);
+        assert!(cert.subject_string().contains("CN=SSLeay/rsa test cert"));
+        assert!(cert.issuer_string().contains("CN=SSLeay/rsa test CA"));
+        assert_eq!(cert.public_key.algorithm, "RSA");
+        assert_eq!(cert.public_key.key_size, Some(512));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "5B:7C:4E:9F:7E:70:16:2F:CC:12:A8:D2:41:6D:AE:35:12:73:97:9F:0E:D0:C9:7D:0F:F1:26:FD:73:A7:EE:66"
+        );
+        // v1 certs have no extensions
+        assert!(cert.extensions.is_empty());
+    }
+
+    #[test]
+    fn pyca_wildcard_san() {
+        let cert = parse_external_pem("pyca-wildcard-san.pem");
+        assert_eq!(cert.version, 3);
+        assert!(cert.subject_string().contains("CN=*.langui.sh"));
+        assert_eq!(cert.public_key.algorithm, "RSA");
+        assert_eq!(cert.public_key.key_size, Some(4096));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "68:98:6E:4D:DA:05:76:BF:E3:61:A7:90:EE:A9:E0:16:15:F6:88:30:4C:17:69:22:1C:73:7E:2B:FD:39:2E:CE"
+        );
+        // Check wildcard SAN entries
+        let san: Vec<_> = cert.san_entries();
+        assert!(!san.is_empty());
+        let dns_names: Vec<_> = san
+            .iter()
+            .filter_map(|e| match e {
+                SanEntry::Dns(n) => Some(n.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(dns_names.contains(&"*.langui.sh"));
+    }
+
+    #[test]
+    fn pyca_utf8_dnsname() {
+        let cert = parse_external_pem("pyca-utf8-dnsname.pem");
+        assert_eq!(cert.version, 3);
+        // Subject contains UTF-8 characters
+        assert!(cert.subject_string().contains("partner.biztositas.hu"));
+        assert_eq!(cert.public_key.algorithm, "RSA");
+        assert_eq!(cert.public_key.key_size, Some(2048));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "FC:3E:3A:A4:21:D3:75:AB:E0:1E:6B:68:13:2C:C0:96:EE:66:24:19:EA:80:84:CC:8E:FC:4A:94:99:57:D6:8E"
+        );
+    }
+
+    #[test]
+    fn pyca_dsa_selfsigned() {
+        let cert = parse_external_pem("pyca-dsa-selfsigned.pem");
+        assert_eq!(cert.version, 3);
+        assert!(cert.subject_string().contains("CN=PyCA DSA CA"));
+        // DSA is not one of our named algorithms so it falls back to OID
+        assert!(
+            cert.public_key.algorithm == "DSA"
+                || cert.public_key.algorithm.contains("1.2.840.10040.4.1"),
+            "expected DSA or DSA OID, got '{}'",
+            cert.public_key.algorithm
+        );
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "0A:A0:FD:DB:5B:87:8E:EE:B5:92:FB:7F:12:2C:A0:05:BC:3B:63:A3:C4:D8:A7:E9:6B:89:CA:B1:FB:5E:70:7F"
+        );
+    }
+}
+
+mod cross_compat_x509_parser {
+    //! Tests against x509-parser's own test assets.
+    use super::*;
+
+    #[test]
+    fn x509p_pem_and_der_produce_same_fingerprint() {
+        let pem_cert = parse_external_pem("x509p-certificate.pem");
+        let der_cert = parse_external_der("x509p-certificate.der");
+        assert_eq!(
+            pem_cert.fingerprint(DigestAlgorithm::Sha256),
+            der_cert.fingerprint(DigestAlgorithm::Sha256),
+        );
+        assert_eq!(pem_cert.serial, der_cert.serial);
+        assert_eq!(pem_cert.subject_string(), der_cert.subject_string());
+    }
+
+    #[test]
+    fn x509p_certificate_pem() {
+        let cert = parse_external_pem("x509p-certificate.pem");
+        assert_eq!(cert.version, 3);
+        assert!(cert.subject_string().contains("CN=lists.for-our.info"));
+        assert!(cert.issuer_string().contains("CN=Let's Encrypt Authority X3"));
+        assert_eq!(cert.public_key.algorithm, "RSA");
+        assert_eq!(cert.public_key.key_size, Some(2048));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "8F:A4:CB:4E:93:8B:5A:85:5F:B1:49:7F:A2:88:AC:55:72:3E:01:09:D0:51:8B:50:54:81:34:8D:EC:0D:E4:71"
+        );
+    }
+
+    #[test]
+    fn x509p_igc_a_french_gov_root() {
+        let cert = parse_external_pem("x509p-IGC_A.pem");
+        assert_eq!(cert.version, 3);
+        // French government root CA with rich DN
+        assert!(cert.subject_string().contains("CN=IGC/A"));
+        assert!(cert.subject_string().contains("C=FR"));
+        assert!(cert.subject_string().contains("O=PM/SGDN"));
+        assert!(cert.subject_string().contains("OU=DCSSI"));
+        // Self-signed
+        assert_eq!(cert.subject_string(), cert.issuer_string());
+        assert_eq!(cert.public_key.algorithm, "RSA");
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "B9:BE:A7:86:0A:96:2E:A3:61:1D:AB:97:AB:6D:A3:E2:1C:10:68:B9:7D:55:57:5E:D0:E1:12:79:C1:1C:89:32"
+        );
+    }
+
+    #[test]
+    fn x509p_igc_a_der_matches_pem() {
+        let pem_cert = parse_external_pem("x509p-IGC_A.pem");
+        let der_cert = parse_external_der("x509p-IGC_A.der");
+        assert_eq!(
+            pem_cert.fingerprint(DigestAlgorithm::Sha256),
+            der_cert.fingerprint(DigestAlgorithm::Sha256),
+        );
+        assert_eq!(pem_cert.subject_string(), der_cert.subject_string());
+        assert_eq!(pem_cert.serial, der_cert.serial);
+    }
+
+    #[test]
+    fn x509p_no_extensions() {
+        let cert = parse_external_pem("x509p-no_extensions.pem");
+        assert!(cert.subject_string().contains("CN=benno"));
+        assert_eq!(cert.public_key.algorithm, "EC");
+        assert_eq!(cert.public_key.key_size, Some(384));
+        assert!(cert.extensions.is_empty());
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "39:F4:1F:F9:38:5A:90:DF:31:A9:0F:C6:C0:C6:86:CF:23:43:DE:A2:F1:8C:D0:58:33:9A:0D:00:A0:7A:51:CB"
+        );
+    }
+
+    #[test]
+    fn x509p_no_extensions_der_matches_pem() {
+        let pem_cert = parse_external_pem("x509p-no_extensions.pem");
+        let der_cert = parse_external_der("x509p-no_extensions.der");
+        assert_eq!(
+            pem_cert.fingerprint(DigestAlgorithm::Sha256),
+            der_cert.fingerprint(DigestAlgorithm::Sha256),
+        );
+    }
+
+    #[test]
+    fn x509p_ed25519_der() {
+        let cert = parse_external_der("x509p-ed25519.der");
+        assert!(cert.subject_string().contains("CN=www.example.com"));
+        assert!(cert.subject_string().contains("C=DE"));
+        assert_eq!(cert.public_key.algorithm, "Ed25519");
+        assert_eq!(cert.public_key.key_size, Some(256));
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "D3:86:93:B6:76:F3:B8:0B:18:3E:7A:B6:1D:14:18:2A:9D:20:7C:13:1A:35:ED:67:69:6C:F8:95:59:72:55:1D"
+        );
+    }
+
+    #[test]
+    fn x509p_v1_cert() {
+        let cert = parse_external_der("x509p-v1.der");
+        assert_eq!(cert.version, 1);
+        assert!(cert.subject_string().contains("CN=marquee"));
+        assert_eq!(cert.public_key.algorithm, "RSA");
+        assert!(cert.extensions.is_empty());
+        assert_eq!(
+            cert.fingerprint(DigestAlgorithm::Sha256),
+            "3D:6D:A6:82:D3:30:93:D8:5A:A6:32:84:6B:A9:FA:BF:31:FE:90:ED:C0:91:A2:7F:D7:F6:2E:51:4F:85:8C:57"
+        );
+    }
+}
+
+mod cross_compat_conversion {
+    //! Roundtrip conversion tests on external certificates.
+    use super::*;
+
+    #[test]
+    fn ossl_rsa_pem_to_der_roundtrip() {
+        let pem_data = load_external("ossl-root-cert.pem");
+        let der_bytes = pem_to_der(&pem_data).unwrap();
+        let pem_string = der_to_pem(&der_bytes);
+        let re_der = pem_to_der(pem_string.as_bytes()).unwrap();
+        assert_eq!(der_bytes, re_der);
+        // Fingerprints must match
+        let cert1 = parse_pem(&pem_data).unwrap();
+        let cert2 = parse_der(&der_bytes).unwrap();
+        assert_eq!(
+            cert1.fingerprint(DigestAlgorithm::Sha256),
+            cert2.fingerprint(DigestAlgorithm::Sha256),
+        );
+    }
+
+    #[test]
+    fn ossl_ed25519_pem_to_der_roundtrip() {
+        let pem_data = load_external("ossl-root-ed25519.pem");
+        let der_bytes = pem_to_der(&pem_data).unwrap();
+        let pem_string = der_to_pem(&der_bytes);
+        let re_der = pem_to_der(pem_string.as_bytes()).unwrap();
+        assert_eq!(der_bytes, re_der);
+    }
+
+    #[test]
+    fn x509p_der_to_pem_roundtrip() {
+        let der_data = load_external("x509p-certificate.der");
+        let pem_string = der_to_pem(&der_data);
+        let re_der = pem_to_der(pem_string.as_bytes()).unwrap();
+        assert_eq!(der_data, re_der);
+    }
+
+    #[test]
+    fn pyca_letsencrypt_pem_to_der_roundtrip() {
+        let pem_data = load_external("pyca-letsencrypt-x3.pem");
+        let der_bytes = pem_to_der(&pem_data).unwrap();
+        let pem_string = der_to_pem(&der_bytes);
+        let re_der = pem_to_der(pem_string.as_bytes()).unwrap();
+        assert_eq!(der_bytes, re_der);
+    }
+}
+
+mod cross_compat_auto_detect {
+    //! Verify that auto-detection (parse_cert) works for all external formats.
+    use super::*;
+
+    #[test]
+    fn auto_detect_all_pem_files() {
+        let pem_files = [
+            "ossl-root-cert.pem",
+            "ossl-server-ecdsa-cert.pem",
+            "ossl-root-ed25519.pem",
+            "ossl-root-ed448-cert.pem",
+            "ossl-many-names1.pem",
+            "pyca-ecdsa-root.pem",
+            "pyca-v1.pem",
+            "pyca-letsencrypt-x3.pem",
+            "pyca-wildcard-san.pem",
+            "pyca-utf8-dnsname.pem",
+            "pyca-dsa-selfsigned.pem",
+            "x509p-certificate.pem",
+            "x509p-IGC_A.pem",
+            "x509p-no_extensions.pem",
+        ];
+        for name in &pem_files {
+            let data = load_external(name);
+            let cert = parse_cert(&data).unwrap_or_else(|e| {
+                panic!("parse_cert failed on PEM file '{}': {}", name, e)
+            });
+            assert!(cert.version >= 1 && cert.version <= 3, "bad version in {}", name);
+            assert!(!cert.serial.is_empty(), "empty serial in {}", name);
+            assert!(!cert.subject_string().is_empty(), "empty subject in {}", name);
+        }
+    }
+
+    #[test]
+    fn auto_detect_all_der_files() {
+        let der_files = [
+            "x509p-certificate.der",
+            "x509p-IGC_A.der",
+            "x509p-no_extensions.der",
+            "x509p-ed25519.der",
+            "x509p-v1.der",
+        ];
+        for name in &der_files {
+            let data = load_external(name);
+            let cert = parse_cert(&data).unwrap_or_else(|e| {
+                panic!("parse_cert failed on DER file '{}': {}", name, e)
+            });
+            assert!(cert.version >= 1 && cert.version <= 3, "bad version in {}", name);
+            assert!(!cert.serial.is_empty(), "empty serial in {}", name);
+        }
+    }
+
+    #[test]
+    fn display_and_json_work_for_all_external_certs() {
+        let all_pem = [
+            "ossl-root-cert.pem",
+            "ossl-server-ecdsa-cert.pem",
+            "ossl-root-ed25519.pem",
+            "ossl-root-ed448-cert.pem",
+            "pyca-ecdsa-root.pem",
+            "pyca-v1.pem",
+            "pyca-letsencrypt-x3.pem",
+            "pyca-dsa-selfsigned.pem",
+            "x509p-certificate.pem",
+            "x509p-IGC_A.pem",
+            "x509p-no_extensions.pem",
+        ];
+        for name in &all_pem {
+            let data = load_external(name);
+            let cert = parse_cert(&data).unwrap();
+            let text = display_text(&cert, true);
+            assert!(text.contains("Certificate:"), "display_text broken for {}", name);
+            let json = to_json(&cert).unwrap_or_else(|e| {
+                panic!("to_json failed for '{}': {}", name, e)
+            });
+            assert!(json.contains("version"), "JSON missing version for {}", name);
+        }
     }
 }
