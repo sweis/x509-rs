@@ -21,6 +21,23 @@ fn cert_path(name: &str) -> std::path::PathBuf {
     p
 }
 
+fn reference_path(name: &str) -> std::path::PathBuf {
+    let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.pop(); // up from xcert-lib to workspace root
+    p.push("tests");
+    p.push("certs");
+    p.push("reference");
+    p.push(name);
+    p
+}
+
+fn load_reference(name: &str) -> String {
+    std::fs::read_to_string(reference_path(name))
+        .unwrap_or_else(|e| panic!("Failed to read reference '{}': {}", name, e))
+        .trim()
+        .to_string()
+}
+
 fn load_cert(name: &str) -> Vec<u8> {
     std::fs::read(cert_path(name)).unwrap_or_else(|e| {
         panic!(
@@ -2622,5 +2639,263 @@ mod cross_compat_auto_detect {
             });
             assert!(json.contains("version"), "JSON missing version for {}", name);
         }
+    }
+}
+
+// =========================================================================
+// REFERENCE TEST VECTORS
+// =========================================================================
+//
+// Compare library output against OpenSSL-generated reference files in
+// tests/certs/reference/ for regression detection.
+
+mod reference_vectors {
+    use super::*;
+
+    /// Normalize an OpenSSL serial like "1000" or "01" to our colon-separated
+    /// format. OpenSSL outputs uppercase hex without colons; our library uses
+    /// colon-separated pairs.
+    fn normalize_serial(openssl_serial: &str) -> String {
+        let hex = openssl_serial.trim().to_ascii_uppercase();
+        // Pad to even length
+        let hex = if hex.len() % 2 != 0 {
+            format!("0{}", hex)
+        } else {
+            hex
+        };
+        hex.as_bytes()
+            .chunks(2)
+            .map(|c| std::str::from_utf8(c).unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join(":")
+    }
+
+    /// Parse OpenSSL fingerprint like "sha256 Fingerprint=AA:BB:CC:..."
+    /// Returns just the "AA:BB:CC:..." part.
+    fn parse_fingerprint(line: &str) -> &str {
+        line.split('=').nth(1).unwrap_or(line).trim()
+    }
+
+    /// Parse OpenSSL subject/issuer like "subject=C = US, ST = California, ..."
+    /// into a list of (key, value) pairs. OpenSSL uses spaces around `=`.
+    fn parse_dn_components(line: &str) -> Vec<(String, String)> {
+        // Strip "subject=" or "issuer=" prefix
+        let dn_str = line.split_once('=').map(|(_, v)| v).unwrap_or(line);
+        let mut components = Vec::new();
+        for part in dn_str.split(", ") {
+            if let Some((key, val)) = part.split_once(" = ") {
+                components.push((key.trim().to_string(), val.trim().to_string()));
+            }
+        }
+        components
+    }
+
+    /// Test data: (cert_file, reference_prefix)
+    const CERTS: &[(&str, &str)] = &[
+        ("root-ca.pem", "root-ca"),
+        ("intermediate-ca.pem", "intermediate-ca"),
+        ("server.pem", "server"),
+        ("client.pem", "client"),
+        ("ec-p256.pem", "ec-p256"),
+        ("ec-p384.pem", "ec-p384"),
+        ("ed25519.pem", "ed25519"),
+        ("expired.pem", "expired"),
+        ("many-extensions.pem", "many-extensions"),
+        ("minimal.pem", "minimal"),
+    ];
+
+    #[test]
+    fn serial_matches_reference() {
+        for (cert_file, prefix) in CERTS {
+            let data = load_cert(cert_file);
+            let cert = parse_pem(&data).unwrap_or_else(|e| {
+                panic!("Failed to parse {}: {}", cert_file, e)
+            });
+
+            let ref_line = load_reference(&format!("{}-serial.txt", prefix));
+            // OpenSSL format: "serial=XX"
+            let ref_serial = ref_line
+                .strip_prefix("serial=")
+                .unwrap_or(&ref_line);
+            let expected = normalize_serial(ref_serial);
+            let actual = cert.serial_hex().to_ascii_uppercase();
+
+            assert_eq!(
+                actual, expected,
+                "serial mismatch for {}: got '{}', expected '{}'",
+                cert_file, actual, expected
+            );
+        }
+    }
+
+    #[test]
+    fn sha256_fingerprint_matches_reference() {
+        for (cert_file, prefix) in CERTS {
+            let data = load_cert(cert_file);
+            let cert = parse_pem(&data).unwrap_or_else(|e| {
+                panic!("Failed to parse {}: {}", cert_file, e)
+            });
+
+            let ref_line = load_reference(&format!("{}-fingerprint-sha256.txt", prefix));
+            let expected = parse_fingerprint(&ref_line);
+            let actual = cert.fingerprint(DigestAlgorithm::Sha256);
+
+            assert_eq!(
+                actual, expected,
+                "SHA-256 fingerprint mismatch for {}",
+                cert_file
+            );
+        }
+    }
+
+    #[test]
+    fn sha1_fingerprint_matches_reference() {
+        for (cert_file, prefix) in CERTS {
+            let data = load_cert(cert_file);
+            let cert = parse_pem(&data).unwrap_or_else(|e| {
+                panic!("Failed to parse {}: {}", cert_file, e)
+            });
+
+            let ref_line = load_reference(&format!("{}-fingerprint-sha1.txt", prefix));
+            let expected = parse_fingerprint(&ref_line);
+            let actual = cert.fingerprint(DigestAlgorithm::Sha1);
+
+            assert_eq!(
+                actual, expected,
+                "SHA-1 fingerprint mismatch for {}",
+                cert_file
+            );
+        }
+    }
+
+    #[test]
+    fn subject_components_match_reference() {
+        // Only test ASCII subjects (skip utf8-subject which has encoding differences)
+        for (cert_file, prefix) in CERTS {
+            let data = load_cert(cert_file);
+            let cert = parse_pem(&data).unwrap_or_else(|e| {
+                panic!("Failed to parse {}: {}", cert_file, e)
+            });
+
+            let ref_line = load_reference(&format!("{}-subject.txt", prefix));
+            let ref_components = parse_dn_components(&ref_line);
+
+            for (ref_key, ref_val) in &ref_components {
+                let found = cert.subject.components.iter().any(|(k, v)| k == ref_key && v == ref_val);
+                assert!(
+                    found,
+                    "subject component {}={} from reference not found in {} (got: {})",
+                    ref_key, ref_val, cert_file, cert.subject_string()
+                );
+            }
+
+            assert_eq!(
+                cert.subject.components.len(),
+                ref_components.len(),
+                "subject component count mismatch for {} (got {}: {}, expected {}: {:?})",
+                cert_file,
+                cert.subject.components.len(),
+                cert.subject_string(),
+                ref_components.len(),
+                ref_components,
+            );
+        }
+    }
+
+    #[test]
+    fn issuer_components_match_reference() {
+        for (cert_file, prefix) in CERTS {
+            let data = load_cert(cert_file);
+            let cert = parse_pem(&data).unwrap_or_else(|e| {
+                panic!("Failed to parse {}: {}", cert_file, e)
+            });
+
+            let ref_line = load_reference(&format!("{}-issuer.txt", prefix));
+            let ref_components = parse_dn_components(&ref_line);
+
+            for (ref_key, ref_val) in &ref_components {
+                let found = cert.issuer.components.iter().any(|(k, v)| k == ref_key && v == ref_val);
+                assert!(
+                    found,
+                    "issuer component {}={} from reference not found in {} (got: {})",
+                    ref_key, ref_val, cert_file, cert.issuer_string()
+                );
+            }
+
+            assert_eq!(
+                cert.issuer.components.len(),
+                ref_components.len(),
+                "issuer component count mismatch for {}",
+                cert_file,
+            );
+        }
+    }
+
+    #[test]
+    fn server_modulus_matches_reference() {
+        let data = load_cert("server.pem");
+        let cert = parse_pem(&data).unwrap();
+
+        let ref_line = load_reference("server-modulus.txt");
+        // OpenSSL format: "Modulus=AABB..."
+        let expected = ref_line
+            .strip_prefix("Modulus=")
+            .unwrap_or(&ref_line)
+            .to_ascii_uppercase();
+
+        let actual = cert
+            .modulus_hex()
+            .expect("server cert should have RSA modulus")
+            .to_ascii_uppercase();
+
+        assert_eq!(actual, expected, "modulus mismatch for server.pem");
+    }
+
+    #[test]
+    fn server_email_matches_reference() {
+        let data = load_cert("server.pem");
+        let cert = parse_pem(&data).unwrap();
+
+        let ref_email = load_reference("server-email.txt");
+        let emails = cert.emails();
+
+        assert!(
+            emails.iter().any(|e| e == &ref_email),
+            "expected email '{}' not found in server.pem emails: {:?}",
+            ref_email,
+            emails
+        );
+    }
+
+    #[test]
+    fn server_ocsp_uri_matches_reference() {
+        let data = load_cert("server.pem");
+        let cert = parse_pem(&data).unwrap();
+
+        let ref_uri = load_reference("server-ocsp-uri.txt");
+        let ocsp_urls = cert.ocsp_urls();
+
+        assert!(
+            ocsp_urls.iter().any(|u| u == &ref_uri),
+            "expected OCSP URI '{}' not found in server.pem: {:?}",
+            ref_uri,
+            ocsp_urls
+        );
+    }
+
+    #[test]
+    fn client_email_matches_reference() {
+        let data = load_cert("client.pem");
+        let cert = parse_pem(&data).unwrap();
+
+        let ref_email = load_reference("client-email.txt");
+        let emails = cert.emails();
+
+        assert!(
+            emails.iter().any(|e| e == &ref_email),
+            "expected email '{}' not found in client.pem emails: {:?}",
+            ref_email,
+            emails
+        );
     }
 }

@@ -69,11 +69,22 @@ pub struct VerifyOptions {
     /// Whether to check certificate validity dates.
     /// Set to `false` to skip time checks (useful for testing expired certs).
     pub check_time: bool,
+    /// Allow verification to succeed if any certificate in the chain (not just
+    /// the root) is in the trust store. Matches OpenSSL's `-partial_chain` flag.
+    pub partial_chain: bool,
+    /// Required Extended Key Usage OID for the leaf certificate (e.g.,
+    /// "1.3.6.1.5.5.7.3.1" for serverAuth). If set, verification fails when
+    /// the leaf's EKU extension is present but does not include this OID.
+    pub purpose: Option<String>,
 }
 
 impl Default for VerifyOptions {
     fn default() -> Self {
-        Self { check_time: true }
+        Self {
+            check_time: true,
+            partial_chain: false,
+            purpose: None,
+        }
     }
 }
 
@@ -219,15 +230,18 @@ impl TrustStore {
         Ok(())
     }
 
-    /// Add all certificates from a PEM bundle. Returns the number of certificates added.
+    /// Add all certificates from a PEM bundle. Returns the number of
+    /// certificates actually added (skipping those that fail to parse).
     pub fn add_pem_bundle(&mut self, pem_data: &[u8]) -> Result<usize, XcertError> {
         let certs = parse_pem_chain(pem_data)?;
-        let count = certs.len();
+        let mut added = 0;
         for cert_der in certs {
             // Skip certificates that fail to parse (some bundles have non-cert entries)
-            let _ = self.add_der(&cert_der);
+            if self.add_der(&cert_der).is_ok() {
+                added += 1;
+            }
         }
-        Ok(count)
+        Ok(added)
     }
 
     /// Find trusted certificates whose subject matches the given issuer name.
@@ -441,6 +455,20 @@ pub fn verify_chain_with_options(
         }
     }
 
+    // RFC 5280 Section 4.2.1.3: CA certificates must have keyCertSign in
+    // Key Usage when the extension is present.
+    for (i, (_, x509)) in parsed.iter().enumerate().skip(1) {
+        if let Ok(Some(ku)) = x509.key_usage() {
+            if !ku.value.key_cert_sign() {
+                let subject = crate::parser::build_dn(x509.subject()).to_oneline();
+                errors.push(format!(
+                    "certificate at depth {} ({}) is a CA but Key Usage does not include keyCertSign",
+                    i, subject
+                ));
+            }
+        }
+    }
+
     // Verify signatures along the chain
     // Each cert should be signed by the next cert in the chain
     for i in 0..parsed.len().saturating_sub(1) {
@@ -458,53 +486,99 @@ pub fn verify_chain_with_options(
         }
     }
 
-    // Verify trust anchoring
-    let last = &parsed[parsed.len() - 1];
-    let (last_der, last_x509) = last;
-    let last_subject = crate::parser::build_dn(last_x509.subject()).to_oneline();
+    // Verify trust anchoring.
+    // With partial_chain, any certificate in the chain that is directly in the
+    // trust store satisfies the anchoring requirement.
+    let mut trust_anchored = false;
 
-    // Check if the last cert in the chain is self-signed (i.e., it's a root)
-    let is_self_signed = last_x509.subject().as_raw() == last_x509.issuer().as_raw()
-        && last_x509.verify_signature(None).is_ok();
-
-    if is_self_signed {
-        // The chain includes the root - check if it's in the trust store
-        if !trust_store.contains(last_der) {
-            errors.push(format!(
-                "root certificate ({}) is not in the trust store",
-                last_subject
-            ));
+    if options.partial_chain {
+        for (der, _) in &parsed {
+            if trust_store.contains(der) {
+                trust_anchored = true;
+                break;
+            }
         }
-    } else {
-        // The chain doesn't include the root - find it in the trust store
-        let issuer_raw = last_x509.issuer().as_raw();
-        let mut found_trusted_root = false;
+    }
 
-        if let Some(candidates) = trust_store.find_by_subject_raw(issuer_raw) {
-            for root_der in candidates {
-                if let Ok((_, root_x509)) = X509Certificate::from_der(root_der) {
-                    if last_x509
-                        .verify_signature(Some(root_x509.public_key()))
-                        .is_ok()
-                    {
-                        // Add the trusted root to the chain info
-                        chain_info.push(ChainCertInfo {
-                            depth: parsed.len(),
-                            subject: crate::parser::build_dn(root_x509.subject()).to_oneline(),
-                            issuer: crate::parser::build_dn(root_x509.issuer()).to_oneline(),
-                        });
-                        found_trusted_root = true;
-                        break;
+    if !trust_anchored {
+        let last = &parsed[parsed.len() - 1];
+        let (last_der, last_x509) = last;
+        let last_subject = crate::parser::build_dn(last_x509.subject()).to_oneline();
+
+        // Check if the last cert in the chain is self-signed (i.e., it's a root)
+        let is_self_signed = last_x509.subject().as_raw() == last_x509.issuer().as_raw()
+            && last_x509.verify_signature(None).is_ok();
+
+        if is_self_signed {
+            // The chain includes the root - check if it's in the trust store
+            if !trust_store.contains(last_der) {
+                errors.push(format!(
+                    "root certificate ({}) is not in the trust store",
+                    last_subject
+                ));
+            }
+        } else {
+            // The chain doesn't include the root - find it in the trust store
+            let issuer_raw = last_x509.issuer().as_raw();
+
+            if let Some(candidates) = trust_store.find_by_subject_raw(issuer_raw) {
+                for root_der in candidates {
+                    if let Ok((_, root_x509)) = X509Certificate::from_der(root_der) {
+                        if last_x509
+                            .verify_signature(Some(root_x509.public_key()))
+                            .is_ok()
+                        {
+                            // Add the trusted root to the chain info
+                            chain_info.push(ChainCertInfo {
+                                depth: parsed.len(),
+                                subject: crate::parser::build_dn(root_x509.subject()).to_oneline(),
+                                issuer: crate::parser::build_dn(root_x509.issuer()).to_oneline(),
+                            });
+                            trust_anchored = true;
+                            break;
+                        }
                     }
                 }
             }
-        }
 
-        if !found_trusted_root {
-            errors.push(format!(
-                "unable to find trusted root for issuer: {}",
-                crate::parser::build_dn(last_x509.issuer()).to_oneline()
-            ));
+            if !trust_anchored {
+                errors.push(format!(
+                    "unable to find trusted root for issuer: {}",
+                    crate::parser::build_dn(last_x509.issuer()).to_oneline()
+                ));
+            }
+        }
+    }
+
+    // Check Extended Key Usage on the leaf certificate (if purpose is specified)
+    if let Some(ref required_oid) = options.purpose {
+        let (_, leaf) = &parsed[0];
+        if let Ok(Some(eku)) = leaf.extended_key_usage() {
+            let eku_val = &eku.value;
+            // Map well-known OIDs to their boolean flags
+            let has_eku = match required_oid.as_str() {
+                "1.3.6.1.5.5.7.3.1" => eku_val.server_auth,
+                "1.3.6.1.5.5.7.3.2" => eku_val.client_auth,
+                "1.3.6.1.5.5.7.3.3" => eku_val.code_signing,
+                "1.3.6.1.5.5.7.3.4" => eku_val.email_protection,
+                "1.3.6.1.5.5.7.3.8" => eku_val.time_stamping,
+                "1.3.6.1.5.5.7.3.9" => eku_val.ocsp_signing,
+                "2.5.29.37.0" => eku_val.any,
+                _ => {
+                    // Check the 'other' OIDs list
+                    eku_val
+                        .other
+                        .iter()
+                        .any(|oid| format!("{}", oid) == *required_oid)
+                }
+            };
+            if !has_eku {
+                let leaf_subject = crate::parser::build_dn(leaf.subject()).to_oneline();
+                errors.push(format!(
+                    "leaf certificate ({}) does not have required EKU {}",
+                    leaf_subject, required_oid
+                ));
+            }
         }
     }
 

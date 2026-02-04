@@ -322,4 +322,4 @@ x509-rs/
 
 ## License
 
-No license file has been added yet. Add a LICENSE file to specify distribution terms.
+This project is licensed under the [MIT License](LICENSE).
