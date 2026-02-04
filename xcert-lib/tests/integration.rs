@@ -1713,3 +1713,411 @@ mod degenerate {
         let _ = pem_to_der(&data);
     }
 }
+
+// =========================================================================
+// 10. CERTIFICATE CHAIN VERIFICATION TESTS
+// =========================================================================
+
+mod verification {
+    use super::*;
+
+    fn real_cert_path(name: &str) -> std::path::PathBuf {
+        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.pop();
+        p.push("tests");
+        p.push("certs");
+        p.push("real");
+        p.push(name);
+        p
+    }
+
+    fn load_real_cert(name: &str) -> Vec<u8> {
+        std::fs::read(real_cert_path(name)).unwrap_or_else(|e| {
+            panic!("Failed to read real cert '{}': {}", name, e)
+        })
+    }
+
+    fn test_trust_store() -> TrustStore {
+        let root_pem = load_real_cert("test-root-ca.pem");
+        TrustStore::from_pem(&root_pem).expect("failed to create trust store from test root CA")
+    }
+
+    fn ec_trust_store() -> TrustStore {
+        let root_pem = load_real_cert("test-ec-root-ca.pem");
+        TrustStore::from_pem(&root_pem).expect("failed to create trust store from EC root CA")
+    }
+
+    // -----------------------------------------------------------------------
+    // PEM chain parsing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_pem_chain_single_cert() {
+        let data = load_real_cert("test-root-ca.pem");
+        let chain = parse_pem_chain(&data).expect("failed to parse single cert");
+        assert_eq!(chain.len(), 1);
+    }
+
+    #[test]
+    fn parse_pem_chain_full_chain() {
+        let data = load_real_cert("test-fullchain.pem");
+        let chain = parse_pem_chain(&data).expect("failed to parse full chain");
+        assert_eq!(chain.len(), 3, "full chain should have 3 certs: leaf + intermediate + root");
+    }
+
+    #[test]
+    fn parse_pem_chain_two_certs() {
+        // server.pem + intermediate-ca.pem
+        let server = load_real_cert("test-server.pem");
+        let intermediate = load_real_cert("test-intermediate-ca.pem");
+        let mut combined = server;
+        combined.extend_from_slice(&intermediate);
+        let chain = parse_pem_chain(&combined).expect("failed to parse two-cert chain");
+        assert_eq!(chain.len(), 2);
+    }
+
+    #[test]
+    fn parse_pem_chain_empty_input() {
+        let result = parse_pem_chain(b"");
+        assert!(result.is_err(), "empty input should fail");
+    }
+
+    #[test]
+    fn parse_pem_chain_no_certs() {
+        let result = parse_pem_chain(b"not a cert");
+        assert!(result.is_err(), "non-cert input should fail");
+    }
+
+    // -----------------------------------------------------------------------
+    // Trust store
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn trust_store_new_is_empty() {
+        let store = TrustStore::new();
+        assert!(store.is_empty());
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn trust_store_from_pem_single_cert() {
+        let store = test_trust_store();
+        assert_eq!(store.len(), 1);
+        assert!(!store.is_empty());
+    }
+
+    #[test]
+    fn trust_store_from_pem_bundle() {
+        let data = load_real_cert("test-fullchain.pem");
+        let store = TrustStore::from_pem(&data).expect("failed to load bundle");
+        assert_eq!(store.len(), 3, "bundle with 3 certs should load 3 entries");
+    }
+
+    #[test]
+    fn trust_store_contains_added_cert() {
+        let root_pem = load_real_cert("test-root-ca.pem");
+        let chain = parse_pem_chain(&root_pem).expect("parse root");
+        let store = test_trust_store();
+        assert!(store.contains(&chain[0]), "trust store should contain the root cert");
+    }
+
+    #[test]
+    fn trust_store_does_not_contain_unknown_cert() {
+        let server_pem = load_real_cert("test-server.pem");
+        let chain = parse_pem_chain(&server_pem).expect("parse server");
+        let store = test_trust_store();
+        assert!(!store.contains(&chain[0]), "trust store should not contain server cert");
+    }
+
+    #[test]
+    fn trust_store_system_loads() {
+        let store = TrustStore::system().expect("system trust store should load");
+        assert!(store.len() > 50, "system store should have many CA certs, got {}", store.len());
+    }
+
+    // -----------------------------------------------------------------------
+    // Chain verification - valid chains
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_valid_full_chain() {
+        let chain_pem = load_real_cert("test-fullchain.pem");
+        let store = test_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, None)
+            .expect("verification should not error");
+        assert!(result.is_valid, "valid full chain should verify: {:?}", result.errors);
+        assert_eq!(result.chain.len(), 3);
+        assert_eq!(result.errors.len(), 0);
+    }
+
+    #[test]
+    fn verify_chain_without_root_uses_trust_store() {
+        // Chain is leaf + intermediate; root should come from trust store
+        let server = load_real_cert("test-server.pem");
+        let intermediate = load_real_cert("test-intermediate-ca.pem");
+        let mut chain_pem = server;
+        chain_pem.extend_from_slice(&intermediate);
+
+        let store = test_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, None)
+            .expect("verification should not error");
+        assert!(result.is_valid, "chain without root should verify using trust store: {:?}", result.errors);
+        // Chain info should include root from trust store
+        assert_eq!(result.chain.len(), 3, "chain should be extended with root from trust store");
+    }
+
+    #[test]
+    fn verify_valid_chain_with_hostname() {
+        let chain_pem = load_real_cert("test-fullchain.pem");
+        let store = test_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, Some("www.example.com"))
+            .expect("verification should not error");
+        assert!(result.is_valid, "hostname www.example.com should match: {:?}", result.errors);
+    }
+
+    #[test]
+    fn verify_valid_chain_with_san_hostname() {
+        let chain_pem = load_real_cert("test-fullchain.pem");
+        let store = test_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, Some("example.com"))
+            .expect("verification should not error");
+        assert!(result.is_valid, "hostname example.com should match SAN: {:?}", result.errors);
+    }
+
+    #[test]
+    fn verify_valid_chain_with_wildcard_hostname() {
+        let chain_pem = load_real_cert("test-fullchain.pem");
+        let store = test_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, Some("sub.example.com"))
+            .expect("verification should not error");
+        assert!(result.is_valid, "wildcard *.example.com should match sub.example.com: {:?}", result.errors);
+    }
+
+    #[test]
+    fn verify_ec_chain() {
+        let chain_pem = load_real_cert("test-ec-fullchain.pem");
+        let store = ec_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, None)
+            .expect("verification should not error");
+        assert!(result.is_valid, "EC chain should verify: {:?}", result.errors);
+        assert_eq!(result.chain.len(), 2);
+    }
+
+    #[test]
+    fn verify_ec_chain_with_hostname() {
+        let chain_pem = load_real_cert("test-ec-fullchain.pem");
+        let store = ec_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, Some("ec.example.com"))
+            .expect("verification should not error");
+        assert!(result.is_valid, "EC cert hostname should match: {:?}", result.errors);
+    }
+
+    #[test]
+    fn verify_self_signed_root_in_trust_store() {
+        let root_pem = load_real_cert("test-root-ca.pem");
+        let store = test_trust_store();
+        let result = verify_pem_chain(&root_pem, &store, None)
+            .expect("verification should not error");
+        assert!(result.is_valid, "self-signed root in trust store should verify: {:?}", result.errors);
+    }
+
+    // -----------------------------------------------------------------------
+    // Chain verification - invalid chains
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_wrong_chain_fails_signature() {
+        let chain_pem = load_real_cert("test-wrong-chain.pem");
+        let store = test_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, None)
+            .expect("verification should not error (just return invalid)");
+        assert!(!result.is_valid, "wrong chain should not verify");
+        assert!(
+            result.errors.iter().any(|e| e.contains("signature verification failed")),
+            "should report signature failure: {:?}", result.errors
+        );
+    }
+
+    #[test]
+    fn verify_untrusted_root_fails() {
+        let chain_pem = load_real_cert("test-fullchain.pem");
+        // Use a different root as trust store - the chain's root won't be in it
+        let store = ec_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, None)
+            .expect("verification should not error");
+        assert!(!result.is_valid, "chain with untrusted root should fail");
+        assert!(
+            result.errors.iter().any(|e| e.contains("not in the trust store")),
+            "should report untrusted root: {:?}", result.errors
+        );
+    }
+
+    #[test]
+    fn verify_wrong_hostname_fails() {
+        let chain_pem = load_real_cert("test-fullchain.pem");
+        let store = test_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, Some("wrong.example.org"))
+            .expect("verification should not error");
+        assert!(!result.is_valid, "wrong hostname should fail");
+        assert!(
+            result.errors.iter().any(|e| e.contains("hostname") && e.contains("wrong.example.org")),
+            "should report hostname mismatch: {:?}", result.errors
+        );
+    }
+
+    #[test]
+    fn verify_deep_wildcard_does_not_match() {
+        let chain_pem = load_real_cert("test-fullchain.pem");
+        let store = test_trust_store();
+        // *.example.com should NOT match deep.sub.example.com
+        let result = verify_pem_chain(&chain_pem, &store, Some("deep.sub.example.com"))
+            .expect("verification should not error");
+        assert!(!result.is_valid, "deep subdomain should not match wildcard");
+    }
+
+    #[test]
+    fn verify_self_signed_not_in_trust_store_fails() {
+        let root_pem = load_real_cert("test-root-ca.pem");
+        // Use EC trust store (doesn't contain RSA root)
+        let store = ec_trust_store();
+        let result = verify_pem_chain(&root_pem, &store, None)
+            .expect("verification should not error");
+        assert!(!result.is_valid, "self-signed cert not in trust store should fail");
+    }
+
+    #[test]
+    fn verify_empty_chain_errors() {
+        let store = test_trust_store();
+        let result = verify_chain(&[], &store, None);
+        assert!(result.is_err(), "empty chain should be an error");
+    }
+
+    #[test]
+    fn verify_chain_missing_intermediate() {
+        // Just the leaf, no intermediate - root can't verify it directly
+        let server_pem = load_real_cert("test-server.pem");
+        let store = test_trust_store();
+        let result = verify_pem_chain(&server_pem, &store, None)
+            .expect("verification should not error");
+        assert!(!result.is_valid, "leaf without intermediate should fail verification");
+    }
+
+    // -----------------------------------------------------------------------
+    // Chain verification with DER input
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_chain_from_der() {
+        let fullchain_pem = load_real_cert("test-fullchain.pem");
+        let chain_der = parse_pem_chain(&fullchain_pem).expect("parse PEM chain");
+        let store = test_trust_store();
+        let result = verify_chain(&chain_der, &store, None)
+            .expect("verification should not error");
+        assert!(result.is_valid, "DER chain should verify: {:?}", result.errors);
+    }
+
+    // -----------------------------------------------------------------------
+    // Verification result structure
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verification_result_chain_depth_ordering() {
+        let chain_pem = load_real_cert("test-fullchain.pem");
+        let store = test_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, None)
+            .expect("verification should not error");
+
+        for (i, cert) in result.chain.iter().enumerate() {
+            assert_eq!(cert.depth, i, "chain depth should be sequential");
+        }
+        // Leaf at depth 0
+        assert!(result.chain[0].subject.contains("www.example.com"));
+        // Root at last depth
+        let last = &result.chain[result.chain.len() - 1];
+        assert!(last.subject.contains("Test Root CA"));
+    }
+
+    #[test]
+    fn verification_result_serializes_to_json() {
+        let chain_pem = load_real_cert("test-fullchain.pem");
+        let store = test_trust_store();
+        let result = verify_pem_chain(&chain_pem, &store, None)
+            .expect("verification should not error");
+        let json = serde_json::to_string(&result).expect("should serialize to JSON");
+        assert!(json.contains("is_valid"));
+        assert!(json.contains("chain"));
+    }
+
+    // -----------------------------------------------------------------------
+    // System trust store with real CA certificates
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn system_trust_store_contains_real_cas() {
+        let store = TrustStore::system().expect("system trust store should load");
+        // System store should have a reasonable number of CAs
+        assert!(store.len() >= 50, "system store has only {} CAs", store.len());
+    }
+
+    #[test]
+    fn system_trust_store_real_ca_certs_are_parseable() {
+        // Load individual real CA certs extracted from system store and verify they parse
+        for name in ["system-ca-0.pem", "system-ca-1.pem", "system-ca-2.pem"] {
+            let data = load_real_cert(name);
+            let cert = parse_cert(&data).unwrap_or_else(|e| {
+                panic!("Real CA cert {} should parse: {}", name, e);
+            });
+            // Real CA certs should have CA=TRUE in basic constraints
+            let is_ca = cert.extensions.iter().any(|ext| {
+                matches!(&ext.value, ExtensionValue::BasicConstraints { ca: true, .. })
+            });
+            assert!(is_ca, "Real CA cert {} should have CA:TRUE", name);
+        }
+    }
+
+    #[test]
+    fn system_ca_certs_are_self_signed() {
+        // Root CA certs should be self-signed (issuer == subject)
+        for name in ["system-ca-0.pem", "system-ca-1.pem", "system-ca-2.pem"] {
+            let data = load_real_cert(name);
+            let cert = parse_cert(&data).unwrap_or_else(|e| {
+                panic!("Real CA cert {} should parse: {}", name, e);
+            });
+            assert_eq!(
+                cert.subject.to_oneline(),
+                cert.issuer.to_oneline(),
+                "Root CA {} should be self-signed (subject == issuer)", name
+            );
+        }
+    }
+
+    #[test]
+    fn system_ca_certs_verify_as_self_signed() {
+        // Root CAs should verify their own signatures
+        for name in ["system-ca-0.pem", "system-ca-1.pem", "system-ca-2.pem"] {
+            let data = load_real_cert(name);
+            let chain_der = parse_pem_chain(&data).expect("parse CA cert");
+            let store = TrustStore::from_pem(&data).expect("create store from CA cert");
+            let result = verify_chain(&chain_der, &store, None)
+                .expect("verification should not error");
+            assert!(
+                result.is_valid,
+                "Real CA cert {} should verify as self-signed: {:?}", name, result.errors
+            );
+        }
+    }
+
+    #[test]
+    fn verify_chain_with_system_trust_store_and_test_chain_fails() {
+        // Our test chain uses a custom root CA not in the system store
+        let chain_pem = load_real_cert("test-fullchain.pem");
+        let store = TrustStore::system().expect("system trust store should load");
+        let result = verify_pem_chain(&chain_pem, &store, None)
+            .expect("verification should not error");
+        // Our test root is NOT in the system store, so this should fail
+        assert!(
+            !result.is_valid,
+            "test chain should not verify against system store (custom root CA)"
+        );
+    }
+}

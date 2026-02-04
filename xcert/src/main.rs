@@ -82,6 +82,21 @@ enum Commands {
         #[arg(long)]
         pem: bool,
     },
+    /// Verify a certificate chain against the system trust store
+    Verify {
+        /// PEM file containing the certificate chain (leaf first, then intermediates).
+        /// Reads from stdin if omitted.
+        file: Option<PathBuf>,
+        /// Hostname to verify against the leaf certificate's SAN/CN
+        #[arg(long)]
+        hostname: Option<String>,
+        /// PEM file containing trusted CA certificates (default: system trust store)
+        #[arg(long, value_name = "FILE")]
+        ca_file: Option<PathBuf>,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Clone, Debug, clap::ValueEnum)]
@@ -301,6 +316,50 @@ fn main() -> Result<()> {
             } else {
                 use std::io::Write;
                 std::io::stdout().write_all(&output_bytes)?;
+            }
+        }
+        Commands::Verify {
+            file,
+            hostname,
+            ca_file,
+            json,
+        } => {
+            let input = read_input(file.as_ref())?;
+
+            let trust_store = if let Some(ca_path) = ca_file {
+                let ca_data = std::fs::read(ca_path)
+                    .with_context(|| format!("Failed to read CA file: {}", ca_path.display()))?;
+                xcert_lib::TrustStore::from_pem(&ca_data)?
+            } else {
+                xcert_lib::TrustStore::system()?
+            };
+
+            let result = xcert_lib::verify_pem_chain(
+                &input,
+                &trust_store,
+                hostname.as_deref(),
+            )?;
+
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                if result.is_valid {
+                    println!("OK");
+                } else {
+                    for err in &result.errors {
+                        eprintln!("error: {}", err);
+                    }
+                }
+                for cert in &result.chain {
+                    println!(
+                        "depth {}: {}",
+                        cert.depth, cert.subject
+                    );
+                }
+            }
+
+            if !result.is_valid {
+                std::process::exit(1);
             }
         }
     }
