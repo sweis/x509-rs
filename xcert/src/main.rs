@@ -82,7 +82,7 @@ enum Commands {
         #[arg(long)]
         pem: bool,
     },
-    /// Verify a certificate chain against the system trust store
+    /// Verify a certificate chain against a trust store
     Verify {
         /// PEM file containing the certificate chain (leaf first, then intermediates).
         /// Reads from stdin if omitted.
@@ -91,8 +91,14 @@ enum Commands {
         #[arg(long)]
         hostname: Option<String>,
         /// PEM file containing trusted CA certificates (default: system trust store)
-        #[arg(long, value_name = "FILE")]
+        #[arg(long = "CAfile", visible_alias = "ca-file", value_name = "FILE")]
         ca_file: Option<PathBuf>,
+        /// PEM file with untrusted intermediate certificates
+        #[arg(long)]
+        untrusted: Option<PathBuf>,
+        /// Skip validity date checks
+        #[arg(long)]
+        no_check_time: bool,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -323,44 +329,61 @@ fn main() -> Result<()> {
             file,
             hostname,
             ca_file,
+            untrusted,
+            no_check_time,
             json,
         } => {
             let input = read_input(file.as_ref())?;
 
             let trust_store = if let Some(ca_path) = ca_file {
-                let ca_data = std::fs::read(ca_path)
-                    .with_context(|| format!("Failed to read CA file: {}", ca_path.display()))?;
-                xcert_lib::TrustStore::from_pem(&ca_data)?
+                xcert_lib::TrustStore::from_pem_file(ca_path)?
             } else {
                 xcert_lib::TrustStore::system()?
             };
 
-            let result = xcert_lib::verify_pem_chain(
-                &input,
-                &trust_store,
-                hostname.as_deref(),
-            )?;
+            let options = xcert_lib::VerifyOptions {
+                check_time: !no_check_time,
+            };
+
+            let result = if let Some(untrusted_path) = untrusted {
+                // Separate leaf + untrusted intermediates (like openssl verify -untrusted)
+                let leaf_der = xcert_lib::pem_to_der(&input)?;
+                let untrusted_data = std::fs::read(untrusted_path)
+                    .with_context(|| format!("Failed to read untrusted file: {}", untrusted_path.display()))?;
+                xcert_lib::verify_with_untrusted(
+                    &leaf_der,
+                    &untrusted_data,
+                    &trust_store,
+                    hostname.as_deref(),
+                    &options,
+                )?
+            } else {
+                xcert_lib::verify_pem_chain_with_options(
+                    &input,
+                    &trust_store,
+                    hostname.as_deref(),
+                    &options,
+                )?
+            };
 
             if *json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
-            } else {
-                if result.is_valid {
-                    println!("OK");
+            } else if result.is_valid {
+                if let Some(f) = file {
+                    println!("{}: {}", f.display(), result);
                 } else {
-                    for err in &result.errors {
-                        eprintln!("error: {}", err);
-                    }
+                    println!("stdin: {}", result);
                 }
-                for cert in &result.chain {
-                    println!(
-                        "depth {}: {}",
-                        cert.depth, cert.subject
-                    );
+            } else {
+                if let Some(f) = file {
+                    eprintln!("{}: {}", f.display(), result);
+                } else {
+                    eprintln!("stdin: {}", result);
                 }
             }
 
             if !result.is_valid {
-                std::process::exit(1);
+                std::process::exit(2);
             }
         }
     }
