@@ -59,6 +59,18 @@ pub fn oid_short_name(oid: &str) -> String {
     }
 }
 
+/// Detect whether input bytes are PEM-encoded.
+///
+/// Returns `true` if the input starts with `-----BEGIN` (after stripping
+/// leading whitespace).
+pub fn is_pem(input: &[u8]) -> bool {
+    input
+        .iter()
+        .skip_while(|b| b.is_ascii_whitespace())
+        .take(10)
+        .eq(b"-----BEGIN".iter())
+}
+
 /// RFC 6125 hostname matching with wildcard support.
 ///
 /// Checks for exact match or wildcard match (e.g., `*.example.com` matches

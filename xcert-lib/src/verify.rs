@@ -676,7 +676,7 @@ pub fn verify_chain_with_options(
                     _ => eku_val
                         .other
                         .iter()
-                        .any(|oid| format!("{}", oid) == *required_oid),
+                        .any(|oid| oid.to_id_string() == *required_oid),
                 };
             if !has_eku {
                 let leaf_subject = crate::parser::build_dn(leaf.subject()).to_oneline();
@@ -831,15 +831,13 @@ pub fn verify_with_untrusted(
     for _ in 0..MAX_CHAIN_DEPTH {
         let mut found = false;
         for (idx, (der, cert)) in intermediates.iter().enumerate() {
-            if used.get(idx).copied().unwrap_or(true) {
+            if used[idx] {
                 continue;
             }
             if cert.subject().as_raw() == current_issuer_raw.as_slice() {
                 chain.push(der.clone());
                 current_issuer_raw = cert.issuer().as_raw().to_vec();
-                if let Some(flag) = used.get_mut(idx) {
-                    *flag = true;
-                }
+                used[idx] = true;
                 found = true;
                 break;
             }
@@ -920,8 +918,7 @@ fn extract_san_dns_names(cert: &X509Certificate) -> Vec<String> {
 fn extract_cn(cert: &X509Certificate) -> Option<String> {
     for rdn in cert.subject().iter() {
         for attr in rdn.iter() {
-            let oid = format!("{}", attr.attr_type());
-            if oid == "2.5.4.3" {
+            if attr.attr_type().to_id_string() == "2.5.4.3" {
                 return attr.as_str().ok().map(|s| s.to_string());
             }
         }
@@ -947,7 +944,7 @@ fn verify_email(cert: &X509Certificate, email: &str) -> bool {
     // Fall back to subject emailAddress (OID 1.2.840.113549.1.9.1)
     for rdn in cert.subject().iter() {
         for attr in rdn.iter() {
-            if format!("{}", attr.attr_type()) == "1.2.840.113549.1.9.1" {
+            if attr.attr_type().to_id_string() == "1.2.840.113549.1.9.1" {
                 if let Ok(val) = attr.as_str() {
                     if val.to_ascii_lowercase() == email_lower {
                         return true;
@@ -1019,7 +1016,7 @@ fn check_name_constraints(
     // Also check subject emailAddress (OID 1.2.840.113549.1.9.1)
     for rdn in cert.subject().iter() {
         for attr in rdn.iter() {
-            if format!("{}", attr.attr_type()) == "1.2.840.113549.1.9.1" {
+            if attr.attr_type().to_id_string() == "1.2.840.113549.1.9.1" {
                 if let Ok(val) = attr.as_str() {
                     email_names.push(val.to_ascii_lowercase());
                 }

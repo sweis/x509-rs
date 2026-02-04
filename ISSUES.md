@@ -134,3 +134,66 @@ unsupported version values.
 
 **Fix:** Simplified both functions to use iterator `.any()` and `matches!()`
 instead of explicit `for` loops with early return.
+
+---
+
+### ~~18. RSA exponent silently defaults to 65537 on parse failure~~ FIXED
+
+**Fix:** `extract_rsa_params()` now returns `None` (via `?`) when the exponent
+cannot be parsed from the DER sequence, instead of silently substituting 65537.
+
+---
+
+### ~~19. DER encoding errors silently swallowed in SPKI PEM generation~~ FIXED
+
+**Fix:** `build_spki_pem()` now propagates DER encoding errors from
+`to_der_vec()` via `map_err` + `?` instead of using `unwrap_or_default()`
+and NULL-byte fallbacks.
+
+---
+
+### ~~20. `check_expiry` skips notBefore validation for non-positive timestamps~~ FIXED
+
+**Fix:** Replaced mixed signed/unsigned comparison with consistent signed
+arithmetic (`not_before > (now as i64)`), correctly handling pre-epoch
+timestamps without skipping validation.
+
+---
+
+### ~~21. Hardcoded DER length limit magic number~~ FIXED
+
+**Fix:** Extracted `MAX_DER_CONTENT_LEN` named constant (0xFF_FFFF / 16 MiB)
+with documentation explaining the 3-byte DER length field limit.
+
+---
+
+### ~~22. Inconsistent IPv6 hex formatting between parser and check modules~~ FIXED
+
+**Fix:** `normalize_ip()` in `check.rs` now uses uppercase hex (`{:X}`)
+matching `format_ip_bytes()` in `parser.rs` for consistent OpenSSL-compatible
+IPv6 formatting.
+
+---
+
+### ~~23. Duplicate PEM detection logic in parser.rs and main.rs~~ FIXED
+
+**Fix:** Extracted `util::is_pem()` shared utility function, exposed as
+`xcert_lib::is_pem()`. Both `parse_cert()` and the CLI convert command
+now call the shared function.
+
+---
+
+### ~~24. OID comparisons use `format!()` instead of `to_id_string()`~~ FIXED
+
+**Fix:** Replaced `format!("{}", oid)` and `format!("{}", attr.attr_type())`
+with `oid.to_id_string()` / `attr.attr_type().to_id_string()` in `verify.rs`
+(EKU check, extract_cn, verify_email, check_name_constraints) and `parser.rs`
+(build_dn). More idiomatic and avoids format machinery overhead.
+
+---
+
+### ~~25. Redundant bounds checks on `used` vector in `verify_with_untrusted`~~ FIXED
+
+**Fix:** Replaced `used.get(idx).copied().unwrap_or(true)` and
+`used.get_mut(idx)` with direct indexing (`used[idx]`), since the vector
+is guaranteed to have the same length as the `intermediates` iterator.
