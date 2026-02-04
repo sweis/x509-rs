@@ -147,6 +147,54 @@ xcert convert --to pem cert.der
 cat cert.pem | xcert convert --to der > cert.der
 ```
 
+### `xcert verify` -- Verify a certificate chain
+
+Verify a certificate chain against a trust store. Returns exit code 0 for
+success, 2 for verification failure.
+
+```
+xcert verify [OPTIONS] [FILE]
+
+Arguments:
+  [FILE]  PEM file containing the certificate chain (leaf first, then
+          intermediates). Reads from stdin if omitted.
+
+Options:
+  --hostname <HOST>     Hostname to verify against the leaf certificate's SAN/CN
+  --CAfile <FILE>       PEM file containing trusted CA certificates
+                        (default: system trust store)
+  --untrusted <FILE>    PEM file with untrusted intermediate certificates
+  --no-check-time       Skip validity date checks
+  --partial-chain       Allow verification to succeed if any certificate in the
+                        chain (not just the root) is in the trust store
+  --purpose <OID>       Required Extended Key Usage OID for the leaf certificate
+  --json                Output in JSON format
+```
+
+Examples:
+```bash
+# Verify a full chain against the system trust store
+xcert verify chain.pem
+
+# Verify with hostname checking
+xcert verify --hostname www.example.com chain.pem
+
+# Use a custom CA file
+xcert verify --CAfile my-ca.pem chain.pem
+
+# Separate leaf and intermediates (like openssl verify -untrusted)
+xcert verify --untrusted intermediates.pem leaf.pem
+
+# Partial chain: trust any cert in the chain that is in the trust store
+xcert verify --partial-chain --CAfile trusted.pem leaf.pem
+
+# Skip date checks (useful for testing expired certs)
+xcert verify --no-check-time chain.pem
+
+# Check that the leaf has serverAuth EKU
+xcert verify --purpose 1.3.6.1.5.5.7.3.1 chain.pem
+```
+
 ## Comparison with `openssl x509`
 
 | openssl x509 | xcert | Notes |
@@ -168,6 +216,10 @@ cat cert.pem | xcert convert --to der > cert.der
 | `openssl x509 -checkemail a@b.com -noout -in cert.pem` | `xcert check email a@b.com cert.pem` | |
 | `openssl x509 -outform DER -in cert.pem -out cert.der` | `xcert convert --to der cert.pem --out cert.der` | |
 | `openssl x509 -inform DER -in cert.der -outform PEM` | `xcert convert --to pem cert.der` | Auto-detects DER |
+| `openssl verify chain.pem` | `xcert verify chain.pem` | |
+| `openssl verify -CAfile ca.pem cert.pem` | `xcert verify --CAfile ca.pem cert.pem` | |
+| `openssl verify -untrusted int.pem leaf.pem` | `xcert verify --untrusted int.pem leaf.pem` | |
+| `openssl verify -partial_chain cert.pem` | `xcert verify --partial-chain cert.pem` | |
 
 ## What is NOT included (by design)
 

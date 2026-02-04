@@ -99,6 +99,12 @@ enum Commands {
         /// Skip validity date checks
         #[arg(long)]
         no_check_time: bool,
+        /// Allow partial chain verification (trust any cert in the chain)
+        #[arg(long)]
+        partial_chain: bool,
+        /// Required Extended Key Usage OID for the leaf certificate
+        #[arg(long, value_name = "OID")]
+        purpose: Option<String>,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -331,6 +337,8 @@ fn main() -> Result<()> {
             ca_file,
             untrusted,
             no_check_time,
+            partial_chain,
+            purpose,
             json,
         } => {
             let input = read_input(file.as_ref())?;
@@ -343,6 +351,8 @@ fn main() -> Result<()> {
 
             let options = xcert_lib::VerifyOptions {
                 check_time: !no_check_time,
+                partial_chain: *partial_chain,
+                purpose: purpose.clone(),
             };
 
             let result = if let Some(untrusted_path) = untrusted {

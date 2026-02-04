@@ -6,13 +6,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Check if the certificate expires within `seconds` from now.
 ///
-/// Returns `true` if the certificate will still be valid after `seconds` have
-/// elapsed. Returns `false` if it will have expired by then (or is already expired).
+/// Returns `true` if the certificate is currently valid (notBefore is in the
+/// past) and will still be valid after `seconds` have elapsed. Returns `false`
+/// if the certificate is not yet valid, already expired, or will expire within
+/// the given window.
 pub fn check_expiry(cert: &CertificateInfo, seconds: u64) -> bool {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+
+    // Check notBefore: certificate must already be valid
+    let not_before = cert.not_before.timestamp;
+    if not_before > 0 && (not_before as u64) > now {
+        return false;
+    }
 
     let deadline = now.saturating_add(seconds);
     let not_after = cert.not_after.timestamp;
