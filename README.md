@@ -14,8 +14,10 @@ or create them.
 ## Features
 
 - **Auto-detection** of PEM vs DER format (no `-inform` flag needed)
-- **Subcommand-based CLI** (`show`, `field`, `check`, `convert`)
+- **Subcommand-based CLI** (`show`, `field`, `check`, `convert`, `verify`)
 - **JSON output** with `--json` for scripting and machine consumption
+- **Certificate chain verification** against the system trust store (same CA
+  bundle as OpenSSL) or a custom CA file, with hostname matching
 - **Certificate checks** for expiry, hostname, email, and IP matching
 - **SHA-256/384/512/SHA-1** fingerprint computation
 - **RSA, ECDSA (P-256/P-384/P-521), Ed25519** key types
@@ -159,9 +161,36 @@ xcert convert --to pem cert.der
 cat cert.pem | xcert convert --to der > cert.der
 ```
 
-### Comparison with `openssl x509`
+### `xcert verify` -- Verify a certificate chain
 
-| openssl x509 | xcert |
+```bash
+# Verify a full chain (leaf + intermediates + root) against system trust store
+xcert verify chain.pem
+
+# Verify with hostname checking
+xcert verify --hostname www.example.com chain.pem
+
+# Use a custom CA file instead of the system trust store
+xcert verify --CAfile my-ca.pem chain.pem
+
+# Separate leaf and intermediates (like openssl verify -untrusted)
+xcert verify --untrusted intermediates.pem leaf.pem
+
+# Skip validity date checks (useful for testing expired certs)
+xcert verify --no-check-time chain.pem
+
+# JSON output
+xcert verify --json chain.pem
+
+# Read from stdin
+cat chain.pem | xcert verify
+```
+
+Exit code 0 means verification passed, exit code 2 means verification failed.
+
+### Comparison with OpenSSL
+
+| OpenSSL | xcert |
 |---|---|
 | `openssl x509 -text -noout -in cert.pem` | `xcert show cert.pem` |
 | `openssl x509 -subject -noout -in cert.pem` | `xcert field subject cert.pem` |
@@ -179,6 +208,9 @@ cat cert.pem | xcert convert --to der > cert.der
 | `openssl x509 -checkip 1.2.3.4 -noout -in cert.pem` | `xcert check ip 1.2.3.4 cert.pem` |
 | `openssl x509 -checkemail a@b.com -noout -in cert.pem` | `xcert check email a@b.com cert.pem` |
 | `openssl x509 -outform DER -in c.pem -out c.der` | `xcert convert --to der c.pem --out c.der` |
+| `openssl verify chain.pem` | `xcert verify chain.pem` |
+| `openssl verify -CAfile ca.pem cert.pem` | `xcert verify --CAfile ca.pem cert.pem` |
+| `openssl verify -untrusted int.pem leaf.pem` | `xcert verify --untrusted int.pem leaf.pem` |
 
 ## Benchmarks
 
@@ -267,25 +299,27 @@ Seed corpus files are pre-populated from the test certificates.
 
 ```
 x509-rs/
-  xcert-lib/          # Library crate (parsing, display, checks, conversion)
+  xcert-lib/          # Library crate (parsing, display, checks, verification)
     src/
       lib.rs          # Public API
       parser.rs       # PEM/DER parsing, CertificateInfo construction
       fields.rs       # Data types (CertificateInfo, extensions, etc.)
+      verify.rs       # Certificate chain verification and trust store
       fingerprint.rs  # SHA-256/384/512/SHA-1 fingerprints
       display.rs      # Human-readable text and JSON output
       check.rs        # Expiry, hostname, email, IP checks
       convert.rs      # PEM <-> DER conversion
+      util.rs         # Shared encoding utilities
     tests/
-      integration.rs  # 121 integration tests
+      integration.rs  # 155 integration tests
   xcert/              # CLI binary crate
     src/main.rs       # clap-based CLI with subcommands
   fuzz/               # cargo-fuzz targets and corpus
   bench/              # Benchmark scripts
-  tests/certs/        # Test certificates (PEM, DER, degenerate)
+  tests/certs/        # Test certificates (PEM, DER, degenerate, real chains)
   docs/               # Design documents and reference
 ```
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+No license file has been added yet. Add a LICENSE file to specify distribution terms.
