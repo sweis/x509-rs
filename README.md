@@ -53,8 +53,9 @@ cargo test
 ```
 
 There are 195 integration tests covering parsing, field extraction, extensions,
-fingerprints, checks, conversion, display, degenerate/malformed inputs, and
-certificate chain verification.
+fingerprints, checks, conversion, display, degenerate/malformed inputs,
+certificate chain verification, cross-compatibility with external test vectors,
+and OpenSSL output format compatibility.
 
 ## Usage
 
@@ -123,6 +124,10 @@ xcert field ext-key-usage cert.pem
 
 # All extensions
 xcert field extensions cert.pem
+
+# Filter a specific extension by name or OID (like openssl x509 -ext)
+xcert field extensions --ext subjectAltName cert.pem
+xcert field extensions --ext "Key Usage" cert.pem
 ```
 
 ### `xcert check` -- Validate certificate properties
@@ -175,11 +180,33 @@ xcert verify --hostname www.example.com chain.pem
 # Use a custom CA file instead of the system trust store
 xcert verify --CAfile my-ca.pem chain.pem
 
+# Add additional trusted CA directory
+xcert verify --CApath /etc/ssl/extra-certs chain.pem
+
 # Separate leaf and intermediates (like openssl verify -untrusted)
 xcert verify --untrusted intermediates.pem leaf.pem
 
+# Check Extended Key Usage purpose (sslserver, sslclient, smimesign, codesign, any, or OID)
+xcert verify --purpose sslserver chain.pem
+
+# Allow partial chain (trust any cert in the chain, not just root)
+xcert verify --partial-chain chain.pem
+
 # Skip validity date checks (useful for testing expired certs)
 xcert verify --no-check-time chain.pem
+
+# Verify at a specific time (Unix timestamp)
+xcert verify --attime 1700000000 chain.pem
+
+# Limit chain depth
+xcert verify --verify-depth 3 chain.pem
+
+# Verify email or IP against the leaf certificate
+xcert verify --verify-email user@example.com chain.pem
+xcert verify --verify-ip 93.184.216.34 chain.pem
+
+# Show the verified chain details
+xcert verify --show-chain chain.pem
 
 # JSON output
 xcert verify --json chain.pem
@@ -212,7 +239,12 @@ Exit code 0 means verification passed, exit code 2 means verification failed.
 | `openssl x509 -outform DER -in c.pem -out c.der` | `xcert convert --to der c.pem --out c.der` |
 | `openssl verify chain.pem` | `xcert verify chain.pem` |
 | `openssl verify -CAfile ca.pem cert.pem` | `xcert verify --CAfile ca.pem cert.pem` |
+| `openssl verify -CApath /dir cert.pem` | `xcert verify --CApath /dir cert.pem` |
 | `openssl verify -untrusted int.pem leaf.pem` | `xcert verify --untrusted int.pem leaf.pem` |
+| `openssl verify -partial_chain cert.pem` | `xcert verify --partial-chain cert.pem` |
+| `openssl verify -purpose sslserver cert.pem` | `xcert verify --purpose sslserver cert.pem` |
+| `openssl verify -attime 1700000000 cert.pem` | `xcert verify --attime 1700000000 cert.pem` |
+| `openssl verify -verify_depth 3 cert.pem` | `xcert verify --verify-depth 3 cert.pem` |
 
 ## Benchmarks
 
