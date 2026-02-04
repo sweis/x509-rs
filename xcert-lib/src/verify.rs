@@ -197,7 +197,7 @@ impl TrustStore {
 
         // Try directory of individual certs
         let mut dir_paths: Vec<Option<String>> = vec![std::env::var("SSL_CERT_DIR").ok()];
-        if let Some(probe_dir) = probe.cert_dir {
+        for probe_dir in probe.cert_dir {
             dir_paths.push(Some(probe_dir.to_string_lossy().into_owned()));
         }
         dir_paths.push(Some("/etc/ssl/certs".into()));
