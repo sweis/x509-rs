@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::io::Read;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(
@@ -101,19 +102,26 @@ enum Commands {
     },
     /// Check certificate properties (exit code 0 = pass, 1 = fail)
     #[command(after_help = "CHECKS:\n\
-                      \n  expiry <SECONDS>   Pass if cert is valid for at least SECONDS more\
+                      \n  expiry <DURATION>  Pass if cert is valid for at least DURATION more\
                       \n  host <HOSTNAME>    Pass if hostname matches SAN/CN (RFC 6125 wildcards)\
                       \n  email <EMAIL>      Pass if email matches SAN or subject emailAddress\
                       \n  ip <ADDRESS>       Pass if IP matches SAN (IPv4 or IPv6)\
+                      \n\nDURATION FORMAT:\n\
+                      \n  Plain numbers are treated as seconds. You can also use humantime\
+                      \n  notation: s, m/min, h/hr, d/day, w/week, month, y/year.\
+                      \n  Combine units: 1h30m, 2d12h, 1w3d.\
                       \n\nEXAMPLES:\n\
-                      \n  xcert check expiry 2592000 cert.pem    # valid for 30+ days?\
+                      \n  xcert check expiry 30d cert.pem         # valid for 30+ days?\
+                      \n  xcert check expiry 2592000 cert.pem     # same, in seconds\
+                      \n  xcert check expiry 1w cert.pem          # valid for 1+ week?\
+                      \n  xcert check expiry 2h30m cert.pem       # valid for 2.5+ hours?\
                       \n  xcert check host www.example.com cert.pem\
                       \n  xcert check email user@example.com cert.pem\
                       \n  xcert check ip 93.184.216.34 cert.pem")]
     Check {
         /// Check to perform: expiry, host, email, ip
         check: CheckType,
-        /// Value to check (seconds for expiry, hostname/email/IP for others)
+        /// Value to check (duration for expiry, hostname/email/IP for others)
         value: String,
         /// Certificate file. Reads from stdin if omitted.
         file: Option<PathBuf>,
@@ -288,6 +296,21 @@ fn infer_format(path: &std::path::Path) -> Option<&'static str> {
     }
 }
 
+/// Parse a duration string using humantime format.
+///
+/// Plain numbers (e.g. "3600") default to seconds. Otherwise, standard
+/// humantime units are accepted: `s`, `m`, `h`, `d`, `w`, `months`, `y`, etc.
+///
+/// Examples: "30", "30s", "5m", "2h30m", "7d", "1w", "30days".
+fn parse_duration(s: &str) -> Result<Duration> {
+    // Plain integer → treat as seconds
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        let secs: u64 = s.parse().context("Invalid duration value")?;
+        return Ok(Duration::from_secs(secs));
+    }
+    humantime::parse_duration(s).with_context(|| format!("Invalid duration: '{s}'"))
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -432,8 +455,8 @@ fn main() -> Result<()> {
 
             let pass = match check {
                 CheckType::Expiry => {
-                    let seconds: u64 = value.parse().context("Invalid seconds value")?;
-                    xcert_lib::check_expiry(&cert, seconds)
+                    let duration = parse_duration(value)?;
+                    xcert_lib::check_expiry(&cert, duration.as_secs())
                 }
                 CheckType::Host => xcert_lib::check_host(&cert, value),
                 CheckType::Email => xcert_lib::check_email(&cert, value),
@@ -629,4 +652,163 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    // ---- Positive cases: valid duration strings ----
+
+    #[test]
+    fn parse_plain_seconds() {
+        assert_eq!(parse_duration("3600").unwrap(), Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn parse_plain_zero() {
+        assert_eq!(parse_duration("0").unwrap(), Duration::from_secs(0));
+    }
+
+    #[test]
+    fn parse_large_plain_number() {
+        assert_eq!(
+            parse_duration("2592000").unwrap(),
+            Duration::from_secs(2592000)
+        );
+    }
+
+    #[test]
+    fn parse_seconds_suffix() {
+        assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn parse_minutes() {
+        assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn parse_minutes_long() {
+        assert_eq!(parse_duration("5min").unwrap(), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn parse_hours() {
+        assert_eq!(parse_duration("2h").unwrap(), Duration::from_secs(7200));
+    }
+
+    #[test]
+    fn parse_hours_long() {
+        assert_eq!(parse_duration("2hr").unwrap(), Duration::from_secs(7200));
+    }
+
+    #[test]
+    fn parse_days() {
+        assert_eq!(parse_duration("7d").unwrap(), Duration::from_secs(604800));
+    }
+
+    #[test]
+    fn parse_days_long() {
+        assert_eq!(
+            parse_duration("7days").unwrap(),
+            Duration::from_secs(604800)
+        );
+    }
+
+    #[test]
+    fn parse_weeks() {
+        assert_eq!(
+            parse_duration("1w").unwrap(),
+            Duration::from_secs(7 * 86400)
+        );
+    }
+
+    #[test]
+    fn parse_weeks_long() {
+        assert_eq!(
+            parse_duration("2weeks").unwrap(),
+            Duration::from_secs(14 * 86400)
+        );
+    }
+
+    #[test]
+    fn parse_combined_hours_minutes() {
+        assert_eq!(
+            parse_duration("2h30m").unwrap(),
+            Duration::from_secs(2 * 3600 + 30 * 60)
+        );
+    }
+
+    #[test]
+    fn parse_combined_days_hours() {
+        assert_eq!(
+            parse_duration("1d12h").unwrap(),
+            Duration::from_secs(86400 + 12 * 3600)
+        );
+    }
+
+    #[test]
+    fn parse_combined_weeks_days() {
+        assert_eq!(
+            parse_duration("1w3d").unwrap(),
+            Duration::from_secs(10 * 86400)
+        );
+    }
+
+    #[test]
+    fn parse_with_spaces() {
+        assert_eq!(parse_duration("1h 30m").unwrap(), Duration::from_secs(5400));
+    }
+
+    #[test]
+    fn parse_seconds_long_word() {
+        assert_eq!(
+            parse_duration("90seconds").unwrap(),
+            Duration::from_secs(90)
+        );
+    }
+
+    // ---- Negative cases: invalid duration strings ----
+
+    #[test]
+    fn reject_empty_string() {
+        assert!(parse_duration("").is_err());
+    }
+
+    #[test]
+    fn reject_bare_unit() {
+        assert!(parse_duration("d").is_err());
+    }
+
+    #[test]
+    fn reject_negative_number() {
+        assert!(parse_duration("-30").is_err());
+    }
+
+    #[test]
+    fn reject_negative_with_unit() {
+        assert!(parse_duration("-5m").is_err());
+    }
+
+    #[test]
+    fn reject_unknown_unit() {
+        assert!(parse_duration("30x").is_err());
+    }
+
+    #[test]
+    fn reject_decimal_plain_number() {
+        assert!(parse_duration("3.5").is_err());
+    }
+
+    #[test]
+    fn reject_garbage() {
+        assert!(parse_duration("abc").is_err());
+    }
+
+    #[test]
+    fn reject_unit_only_no_number() {
+        assert!(parse_duration("hours").is_err());
+    }
 }
