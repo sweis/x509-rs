@@ -52,10 +52,19 @@ pub struct DistinguishedName {
 impl DistinguishedName {
     /// Format as a comma-separated one-line string matching OpenSSL's default format.
     /// Example: "C = US, O = Org, CN = example.com"
+    ///
+    /// Values containing commas, equals signs, or backslashes are escaped
+    /// to prevent ambiguous output.
     pub fn to_oneline(&self) -> String {
         self.components
             .iter()
-            .map(|(k, v)| format!("{} = {}", k, v))
+            .map(|(k, v)| {
+                let escaped = v
+                    .replace('\\', "\\\\")
+                    .replace(',', "\\,")
+                    .replace('=', "\\=");
+                format!("{} = {}", k, escaped)
+            })
             .collect::<Vec<_>>()
             .join(", ")
     }

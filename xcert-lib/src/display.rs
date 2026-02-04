@@ -13,7 +13,12 @@ pub fn display_text(cert: &CertificateInfo, show_all: bool) -> String {
     let mut out = String::new();
 
     let _ = writeln!(out, "Certificate:");
-    let _ = writeln!(out, "  Version: {} (0x{:x})", cert.version, cert.version.saturating_sub(1));
+    let _ = writeln!(
+        out,
+        "  Version: {} (0x{:x})",
+        cert.version,
+        cert.version.saturating_sub(1)
+    );
     let _ = writeln!(out, "  Serial: {}", cert.serial);
     let _ = writeln!(out, "  Signature Algorithm: {}", cert.signature_algorithm);
     let _ = writeln!(out, "  Issuer: {}", cert.issuer_string());
@@ -74,7 +79,11 @@ fn format_extension(out: &mut String, ext: &Extension) {
                 Some(n) => format!(", pathlen:{}", n),
                 None => String::new(),
             };
-            let _ = writeln!(out, "    Basic Constraints:{} CA={}{}", critical_str, ca, pl);
+            let _ = writeln!(
+                out,
+                "    Basic Constraints:{} CA={}{}",
+                critical_str, ca, pl
+            );
         }
         ExtensionValue::KeyUsage(usages) => {
             let _ = writeln!(out, "    Key Usage:{} {}", critical_str, usages.join(", "));

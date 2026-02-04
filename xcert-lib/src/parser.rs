@@ -48,8 +48,8 @@ pub fn parse_pem(input: &[u8]) -> Result<CertificateInfo, XcertError> {
 
 /// Parse a certificate from DER format.
 pub fn parse_der(input: &[u8]) -> Result<CertificateInfo, XcertError> {
-    let (remaining, x509) = X509Certificate::from_der(input)
-        .map_err(|e| XcertError::DerError(format!("{}", e)))?;
+    let (remaining, x509) =
+        X509Certificate::from_der(input).map_err(|e| XcertError::DerError(format!("{}", e)))?;
 
     // Use only the actual certificate bytes, not any trailing data,
     // so that fingerprints are computed over the correct content.
@@ -154,9 +154,7 @@ fn build_datetime(asn1_time: &ASN1Time) -> DateTime {
     }
 }
 
-fn build_public_key_info(
-    spki: &SubjectPublicKeyInfo,
-) -> Result<PublicKeyInfo, XcertError> {
+fn build_public_key_info(spki: &SubjectPublicKeyInfo) -> Result<PublicKeyInfo, XcertError> {
     let oid_str = spki.algorithm.algorithm.to_id_string();
 
     let (algorithm, key_size, curve, modulus, exponent) = match oid_str.as_str() {
@@ -267,8 +265,15 @@ fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> String {
 }
 
 /// Wrap content bytes in a DER tag-length-value envelope.
+///
+/// Supports content lengths up to 16 MiB (0xFFFFFF). Panics if content
+/// exceeds this limit, which cannot occur for certificate SPKI data.
 fn der_wrap(tag: u8, content: &[u8]) -> Vec<u8> {
     let len = content.len();
+    assert!(
+        len <= 0xFF_FFFF,
+        "DER content length {len} exceeds maximum supported (16 MiB)"
+    );
     let mut buf = Vec::with_capacity(1 + 4 + len);
     buf.push(tag);
     if len < 0x80 {
@@ -276,7 +281,7 @@ fn der_wrap(tag: u8, content: &[u8]) -> Vec<u8> {
     } else if len < 0x100 {
         buf.push(0x81);
         buf.push(len as u8);
-    } else if len < 0x10000 {
+    } else if len < 0x1_0000 {
         buf.push(0x82);
         buf.push((len >> 8) as u8);
         buf.push(len as u8);
@@ -290,14 +295,8 @@ fn der_wrap(tag: u8, content: &[u8]) -> Vec<u8> {
     buf
 }
 
-fn build_extensions(
-    extensions: &[X509Extension],
-) -> Result<Vec<Extension>, XcertError> {
-    let mut result = Vec::new();
-    for ext in extensions {
-        result.push(build_extension(ext)?);
-    }
-    Ok(result)
+fn build_extensions(extensions: &[X509Extension]) -> Result<Vec<Extension>, XcertError> {
+    extensions.iter().map(build_extension).collect()
 }
 
 fn build_extension(ext: &X509Extension) -> Result<Extension, XcertError> {
@@ -432,9 +431,7 @@ fn build_extension(ext: &X509Extension) -> Result<Extension, XcertError> {
                 .collect();
             ExtensionValue::CertificatePolicies(oids)
         }
-        ParsedExtension::NsCertComment(comment) => {
-            ExtensionValue::NsComment(comment.to_string())
-        }
+        ParsedExtension::NsCertComment(comment) => ExtensionValue::NsComment(comment.to_string()),
         _ => {
             let hex = hex::encode(ext.value);
             ExtensionValue::Raw(hex)
