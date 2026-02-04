@@ -209,6 +209,15 @@ enum Commands {
         /// Display subject and issuer for each certificate in the verified chain
         #[arg(long)]
         show_chain: bool,
+        /// PEM file containing CRL(s) for revocation checking
+        #[arg(long = "CRLfile", visible_alias = "crl-file", value_name = "FILE")]
+        crl_file: Option<PathBuf>,
+        /// Check CRL revocation for the leaf certificate
+        #[arg(long)]
+        crl_check: bool,
+        /// Check CRL revocation for all certificates in the chain
+        #[arg(long)]
+        crl_check_all: bool,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -516,6 +525,9 @@ fn main() -> Result<()> {
             attime,
             verify_depth,
             show_chain,
+            crl_file,
+            crl_check,
+            crl_check_all,
             json,
         } => {
             let input = read_input(file.as_ref())?;
@@ -529,6 +541,15 @@ fn main() -> Result<()> {
             if let Some(ca_dir) = ca_path {
                 trust_store.add_pem_directory(ca_dir)?;
             }
+
+            // Load CRL file if provided
+            let crl_ders = if let Some(crl_path) = crl_file {
+                let crl_data = std::fs::read(crl_path)
+                    .with_context(|| format!("Failed to read CRL file: {}", crl_path.display()))?;
+                xcert_lib::parse_pem_crl(&crl_data)?
+            } else {
+                Vec::new()
+            };
 
             // Resolve named purposes (sslserver, sslclient, etc.) to OIDs
             let resolved_purpose = purpose.as_ref().map(|p| {
@@ -545,6 +566,9 @@ fn main() -> Result<()> {
                 verify_depth: *verify_depth,
                 verify_email: verify_email.clone(),
                 verify_ip: verify_ip.clone(),
+                crl_ders,
+                crl_check_leaf: *crl_check || *crl_check_all,
+                crl_check_all: *crl_check_all,
             };
 
             let result = if let Some(untrusted_path) = untrusted {

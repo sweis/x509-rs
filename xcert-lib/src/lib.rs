@@ -23,8 +23,8 @@ pub use fields::{
 pub use fingerprint::compute_fingerprint;
 pub use parser::{parse_cert, parse_der, parse_pem};
 pub use verify::{
-    find_system_ca_bundle, parse_pem_chain, resolve_purpose, verify_chain,
-    verify_chain_with_options, verify_pem_chain, verify_pem_chain_with_options,
+    check_crl_revocation, find_system_ca_bundle, parse_pem_chain, parse_pem_crl, resolve_purpose,
+    verify_chain, verify_chain_with_options, verify_pem_chain, verify_pem_chain_with_options,
     verify_with_untrusted, ChainCertInfo, TrustStore, VerificationResult, VerifyOptions,
 };
 

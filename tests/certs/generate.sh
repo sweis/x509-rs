@@ -428,9 +428,162 @@ openssl req -new -x509 -key utf8-subject.key \
     -sha256 2>/dev/null
 
 # ---------------------------------------------------------------------------
-# 12. Certificate chain bundle (PEM concatenation)
+# 12. Name-constrained CA and certs (for Name Constraints tests)
 # ---------------------------------------------------------------------------
-echo "[12/12] Certificate chain bundle"
+echo "[12/15] Name-constrained CA"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+    -out nc-ca.key 2>/dev/null
+
+write_ext_config nc-ca-ext.cnf <<'EOF'
+[req]
+distinguished_name = dn
+prompt = no
+
+[dn]
+C = US
+O = Name Constrained CA
+CN = NC Test CA
+
+[v3_nc_ca]
+basicConstraints = critical, CA:TRUE
+keyUsage = critical, keyCertSign, cRLSign
+subjectKeyIdentifier = hash
+nameConstraints = critical, permitted;DNS:example.com, permitted;email:example.com, excluded;DNS:bad.example.com
+EOF
+
+openssl req -new -x509 -key nc-ca.key \
+    -out nc-ca.pem \
+    -days 27393 \
+    -set_serial 0x8000 \
+    -config nc-ca-ext.cnf \
+    -extensions v3_nc_ca \
+    -sha256 2>/dev/null
+
+# Certificate within name constraints (allowed)
+echo "[13/15] Certificate within name constraints"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+    -out nc-good.key 2>/dev/null
+
+write_ext_config nc-good-ext.cnf <<'EOF'
+[req]
+distinguished_name = dn
+prompt = no
+
+[dn]
+C = US
+O = Good Leaf
+CN = www.example.com
+
+[v3_leaf]
+basicConstraints = CA:FALSE
+keyUsage = critical, digitalSignature
+subjectKeyIdentifier = hash
+subjectAltName = DNS:www.example.com, email:user@example.com
+EOF
+
+openssl req -new -key nc-good.key \
+    -out nc-good.csr \
+    -config nc-good-ext.cnf 2>/dev/null
+
+openssl x509 -req -in nc-good.csr \
+    -CA nc-ca.pem -CAkey nc-ca.key \
+    -out nc-good.pem \
+    -days 27393 \
+    -set_serial 0x8001 \
+    -extfile nc-good-ext.cnf \
+    -extensions v3_leaf \
+    -sha256 2>/dev/null
+
+# Certificate violating name constraints (DNS outside permitted)
+echo "[14/15] Certificate violating name constraints"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+    -out nc-bad.key 2>/dev/null
+
+write_ext_config nc-bad-ext.cnf <<'EOF'
+[req]
+distinguished_name = dn
+prompt = no
+
+[dn]
+C = US
+O = Bad Leaf
+CN = www.evil.com
+
+[v3_leaf]
+basicConstraints = CA:FALSE
+keyUsage = critical, digitalSignature
+subjectKeyIdentifier = hash
+subjectAltName = DNS:www.evil.com
+EOF
+
+openssl req -new -key nc-bad.key \
+    -out nc-bad.csr \
+    -config nc-bad-ext.cnf 2>/dev/null
+
+openssl x509 -req -in nc-bad.csr \
+    -CA nc-ca.pem -CAkey nc-ca.key \
+    -out nc-bad.pem \
+    -days 27393 \
+    -set_serial 0x8002 \
+    -extfile nc-bad-ext.cnf \
+    -extensions v3_leaf \
+    -sha256 2>/dev/null
+
+# ---------------------------------------------------------------------------
+# 15. CRL (Certificate Revocation List)
+# ---------------------------------------------------------------------------
+echo "[15/15] CRL for intermediate CA"
+
+# Create an OpenSSL CA database for CRL generation
+mkdir -p ca-db
+touch ca-db/index.txt
+echo "01" > ca-db/crlnumber
+
+write_ext_config ca-db/ca.cnf <<'EOF'
+[ca]
+default_ca = CA_default
+
+[CA_default]
+database = ca-db/index.txt
+crlnumber = ca-db/crlnumber
+default_md = sha256
+default_crl_days = 3650
+
+[crl_ext]
+authorityKeyIdentifier = keyid:always
+EOF
+
+# Revoke the server certificate (serial 0x1000)
+echo "V	991231235959Z		1000	unknown	/C=US/ST=California/L=San Francisco/O=Example Corp/CN=www.example.com" > ca-db/index.txt
+
+# Mark serial 1000 as Revoked with reason keyCompromise
+sed -i 's/^V/R/' ca-db/index.txt
+# Add revocation date
+sed -i "s/\tR/R/" ca-db/index.txt || true
+
+# Use a simpler approach: create the CRL by manually revoking
+rm -f ca-db/index.txt
+touch ca-db/index.txt
+
+# First add the cert to the CA database, then revoke it
+openssl ca -config ca-db/ca.cnf \
+    -cert intermediate-ca.pem -keyfile intermediate-ca.key \
+    -revoke server.pem \
+    -crl_reason keyCompromise \
+    -batch 2>/dev/null || true
+
+# Generate the CRL
+openssl ca -config ca-db/ca.cnf \
+    -cert intermediate-ca.pem -keyfile intermediate-ca.key \
+    -gencrl -out test.crl.pem \
+    -batch 2>/dev/null
+
+rm -rf ca-db
+
+# ---------------------------------------------------------------------------
+# Certificate chain bundle (PEM concatenation)
+# ---------------------------------------------------------------------------
+echo "Building chain bundle"
 cat server.pem intermediate-ca.pem root-ca.pem > chain.pem
 
 # ---------------------------------------------------------------------------
