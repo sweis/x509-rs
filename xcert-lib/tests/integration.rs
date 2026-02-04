@@ -729,7 +729,6 @@ mod checks {
             "should not match nobody@bad.com"
         );
     }
-
 }
 
 // =========================================================================
@@ -2214,7 +2213,6 @@ mod cross_compat_conversion {
             cert2.fingerprint(DigestAlgorithm::Sha256),
         );
     }
-
 }
 
 mod cross_compat_auto_detect {
@@ -2632,7 +2630,6 @@ mod name_constraints {
         );
     }
 
-
     #[test]
     fn nc_ca_has_name_constraints_extension() {
         let data = load_cert("nc-ca.pem");
@@ -3029,10 +3026,7 @@ mod verify_options {
         };
         let result = verify_chain_with_options(&chain, &store, None, &options)
             .expect("verification should not error");
-        assert!(
-            !result.is_valid,
-            "should fail with non-matching email"
-        );
+        assert!(!result.is_valid, "should fail with non-matching email");
         assert!(
             result
                 .errors
@@ -3093,10 +3087,7 @@ mod verify_options {
         };
         let result = verify_chain_with_options(&chain, &store, None, &options)
             .expect("verification should not error");
-        assert!(
-            !result.is_valid,
-            "should fail with non-matching IP"
-        );
+        assert!(!result.is_valid, "should fail with non-matching IP");
         assert!(
             result
                 .errors
@@ -3223,8 +3214,7 @@ mod verify_options {
     fn verification_result_display_ok() {
         let chain = main_chain_der();
         let store = main_trust_store();
-        let result =
-            verify_chain(&chain, &store, None).expect("verification should not error");
+        let result = verify_chain(&chain, &store, None).expect("verification should not error");
         assert!(result.is_valid);
         let display = format!("{}", result);
         assert!(
@@ -3243,11 +3233,10 @@ mod verify_options {
     fn verification_result_display_fail() {
         let chain = main_chain_der();
         // Use a wrong trust store so verification fails
-        let ec_root_pem = std::fs::read(cert_path("real/test-ec-root-ca.pem"))
-            .expect("read EC root");
+        let ec_root_pem =
+            std::fs::read(cert_path("real/test-ec-root-ca.pem")).expect("read EC root");
         let store = TrustStore::from_pem(&ec_root_pem).expect("create EC store");
-        let result =
-            verify_chain(&chain, &store, None).expect("verification should not error");
+        let result = verify_chain(&chain, &store, None).expect("verification should not error");
         assert!(!result.is_valid);
         let display = format!("{}", result);
         assert!(
@@ -3507,10 +3496,7 @@ mod parser_fields_additional {
         let cert = parse_cert(&data).unwrap();
         let display = format!("{}", cert.subject);
         let oneline = cert.subject.to_oneline();
-        assert_eq!(
-            display, oneline,
-            "Display impl should match to_oneline()"
-        );
+        assert_eq!(display, oneline, "Display impl should match to_oneline()");
         assert!(
             display.contains("CN = www.example.com"),
             "Display should contain CN: {}",
