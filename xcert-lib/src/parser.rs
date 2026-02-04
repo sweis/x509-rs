@@ -17,13 +17,7 @@ pub fn parse_cert(input: &[u8]) -> Result<CertificateInfo, XcertError> {
         return Err(XcertError::ParseError("empty input".into()));
     }
 
-    let is_pem = input
-        .iter()
-        .skip_while(|b| b.is_ascii_whitespace())
-        .take(10)
-        .eq(b"-----BEGIN".iter());
-
-    if is_pem {
+    if util::is_pem(input) {
         parse_pem(input)
     } else {
         parse_der(input)
@@ -132,7 +126,7 @@ pub(crate) fn build_dn(name: &X509Name) -> DistinguishedName {
     let mut components = Vec::new();
     for rdn in name.iter() {
         for attr in rdn.iter() {
-            let key = util::oid_short_name(&format!("{}", attr.attr_type()));
+            let key = util::oid_short_name(&attr.attr_type().to_id_string());
             let value = attr.as_str().unwrap_or("<binary>").to_string();
             components.push((key, value));
         }
@@ -213,7 +207,7 @@ fn extract_rsa_params(data: &[u8]) -> Option<(String, u32, u64)> {
         _ => &bytes,
     };
     let bits = (significant.len() as u32) * 8;
-    let exponent = seq.get(1).and_then(|e| e.as_u64().ok()).unwrap_or(65537);
+    let exponent = seq.get(1).and_then(|e| e.as_u64().ok())?;
     Some((hex::encode_upper(significant), bits, exponent))
 }
 
@@ -235,9 +229,14 @@ fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> Result<String, XcertError> {
     use x509_parser::der_parser::asn1_rs::ToDer;
 
     // Encode individual components using asn1-rs ToDer for correct TLV encoding.
-    let oid_der = spki.algorithm.algorithm.to_der_vec().unwrap_or_default();
+    let oid_der =
+        spki.algorithm.algorithm.to_der_vec().map_err(|e| {
+            XcertError::ParseError(format!("failed to encode algorithm OID: {}", e))
+        })?;
     let params_der = match &spki.algorithm.parameters {
-        Some(any) => any.to_der_vec().unwrap_or_else(|_| vec![0x05, 0x00]),
+        Some(any) => any.to_der_vec().map_err(|e| {
+            XcertError::ParseError(format!("failed to encode algorithm parameters: {}", e))
+        })?,
         None => Vec::new(), // absent parameters (e.g. EdDSA per RFC 8410)
     };
 
@@ -268,16 +267,19 @@ fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> Result<String, XcertError> {
     ))
 }
 
+/// Maximum content length for DER TLV encoding with a 3-byte length field.
+const MAX_DER_CONTENT_LEN: usize = 0xFF_FFFF; // 16 MiB
+
 /// Wrap content bytes in a DER tag-length-value envelope.
 ///
-/// Supports content lengths up to 16 MiB (0xFFFFFF). Returns an error
-/// if content exceeds this limit.
+/// Supports content lengths up to [`MAX_DER_CONTENT_LEN`] (16 MiB).
+/// Returns an error if content exceeds this limit.
 fn der_wrap(tag: u8, content: &[u8]) -> Result<Vec<u8>, XcertError> {
     let len = content.len();
-    if len > 0xFF_FFFF {
+    if len > MAX_DER_CONTENT_LEN {
         return Err(XcertError::ParseError(format!(
-            "DER content length {} exceeds maximum supported (16 MiB)",
-            len
+            "DER content length {} exceeds maximum supported ({})",
+            len, MAX_DER_CONTENT_LEN
         )));
     }
     let mut buf = Vec::with_capacity(1 + 4 + len);

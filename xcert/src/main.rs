@@ -475,12 +475,7 @@ fn main() -> Result<()> {
             } else if *der {
                 false
             } else {
-                // auto-detect (compare via iterator without heap allocation)
-                input
-                    .iter()
-                    .skip_while(|b| b.is_ascii_whitespace())
-                    .take(10)
-                    .eq(b"-----BEGIN".iter())
+                xcert_lib::is_pem(&input)
             };
 
             let output_bytes: Vec<u8> = match format.as_str() {
