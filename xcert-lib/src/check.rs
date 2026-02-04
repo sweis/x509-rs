@@ -39,65 +39,44 @@ pub fn check_expiry(cert: &CertificateInfo, seconds: u64) -> bool {
 /// Supports wildcard matching (e.g., `*.example.com` matches `sub.example.com`
 /// but not `deep.sub.example.com` or `example.com`).
 pub fn check_host(cert: &CertificateInfo, hostname: &str) -> bool {
-    let hostname_lower = hostname.to_ascii_lowercase();
+    let dns_names: Vec<String> = cert
+        .san_entries()
+        .into_iter()
+        .filter_map(|e| match e {
+            SanEntry::Dns(name) => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
 
-    // Check SAN DNS entries in a single pass without collecting into a Vec
-    let mut has_san_dns = false;
-    for entry in cert.san_entries() {
-        if let SanEntry::Dns(name) = entry {
-            has_san_dns = true;
-            if util::hostname_matches(name, &hostname_lower) {
-                return true;
-            }
-        }
-    }
+    let cn = cert
+        .subject
+        .components
+        .iter()
+        .find(|(k, _)| k == "CN")
+        .map(|(_, v)| v.as_str());
 
-    // If SAN DNS entries exist, use them exclusively (RFC 6125)
-    if has_san_dns {
-        return false;
-    }
-
-    // Fall back to CN if no SAN DNS entries
-    for (key, value) in &cert.subject.components {
-        if key == "CN" && util::hostname_matches(value, &hostname_lower) {
-            return true;
-        }
-    }
-
-    false
+    util::verify_hostname_match(&dns_names, cn, hostname)
 }
 
 /// Check if the certificate matches the given email address.
 ///
 /// Checks SAN email entries and subject emailAddress attribute.
 pub fn check_email(cert: &CertificateInfo, email: &str) -> bool {
-    let email_lower = email.to_ascii_lowercase();
-    cert.emails()
-        .into_iter()
-        .any(|e| e.to_ascii_lowercase() == email_lower)
+    util::verify_email_match(&cert.emails(), email)
 }
 
 /// Check if the certificate matches the given IP address.
 ///
 /// Checks SAN IP address entries. Supports both IPv4 and IPv6.
 pub fn check_ip(cert: &CertificateInfo, ip: &str) -> bool {
-    let normalized = normalize_ip(ip);
-    cert.san_entries()
+    let san_ips: Vec<String> = cert
+        .san_entries()
         .into_iter()
-        .any(|entry| matches!(entry, SanEntry::Ip(san_ip) if normalize_ip(san_ip) == normalized))
-}
+        .filter_map(|e| match e {
+            SanEntry::Ip(ip_str) => Some(ip_str.clone()),
+            _ => None,
+        })
+        .collect();
 
-pub(crate) fn normalize_ip(ip: &str) -> String {
-    if let Ok(addr) = ip.parse::<std::net::Ipv4Addr>() {
-        return addr.to_string();
-    }
-    if let Ok(addr) = ip.parse::<std::net::Ipv6Addr>() {
-        let segments = addr.segments();
-        return segments
-            .iter()
-            .map(|s| format!("{:X}", s))
-            .collect::<Vec<_>>()
-            .join(":");
-    }
-    ip.to_ascii_lowercase()
+    util::verify_ip_match(&san_ips, ip)
 }

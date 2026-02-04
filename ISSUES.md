@@ -1,6 +1,6 @@
 # Known Issues
 
-Issues identified during code review. All issues below have been fixed.
+Issues identified during code review. All 35 issues have been fixed.
 
 ## Security / Correctness
 
@@ -197,3 +197,94 @@ with `oid.to_id_string()` / `attr.attr_type().to_id_string()` in `verify.rs`
 **Fix:** Replaced `used.get(idx).copied().unwrap_or(true)` and
 `used.get_mut(idx)` with direct indexing (`used[idx]`), since the vector
 is guaranteed to have the same length as the `intermediates` iterator.
+
+---
+
+## Round 3: Post-merge comprehensive review
+
+Issues identified after merging significant new features (directory/batch mode,
+chain detection, Name Constraints, keyCertSign, trusted root validation,
+`find_system_ca_bundle()`).
+
+### ~~26. Duplicate hostname/email/IP matching logic in `check.rs` and `verify.rs`~~ FIXED
+
+**Fix:** Extracted shared matching functions `verify_hostname_match()`,
+`verify_email_match()`, and `verify_ip_match()` into `util.rs`. Both
+`check.rs` (operating on `CertificateInfo`) and `verify.rs` (operating on
+`X509Certificate`) now extract their data and delegate to the shared functions.
+
+---
+
+### ~~27. `find_system_ca_bundle()` duplicates path discovery from `TrustStore::system()`~~ FIXED
+
+**Fix:** Extracted `KNOWN_CA_BUNDLE_PATHS` and `KNOWN_CA_DIR_PATHS` constants.
+`TrustStore::system()` now calls `find_system_ca_bundle()` for file discovery
+and `add_pem_directory()` for directory loading. Both functions also check
+`SSL_CERT_FILE` / `SSL_CERT_DIR` environment variables.
+
+---
+
+### ~~28. `serial_compact()` is unused dead code~~ FIXED
+
+**Fix:** Removed the unused `serial_compact()` method from `fields.rs`.
+
+---
+
+### ~~29. Repeated `build_dn(x509.subject()).to_oneline()` pattern in `verify.rs`~~ FIXED
+
+**Fix:** Pre-computed `subjects` and `issuers` vectors once after parsing
+the chain. All helper functions receive the pre-computed strings, eliminating
+repeated DN traversal and allocation.
+
+---
+
+### ~~30. `format_crl_reason()` relies on fragile Debug string matching~~ FIXED
+
+**Fix:** Replaced `Debug` string matching with direct numeric matching on
+`rc.0` (the underlying `u8` value). Matches RFC 5280 reason code values
+0–10 directly, immune to upstream `Debug` formatting changes.
+
+---
+
+### ~~31. No file size limit for disk file reads~~ FIXED
+
+**Fix:** Added `MAX_INPUT_BYTES` constant (10 MiB) and a `std::fs::metadata()`
+size check before `std::fs::read()`. Files exceeding the limit produce a
+clear error message. Both stdin and disk file paths now share the same limit.
+
+---
+
+### ~~32. IPv6 formatting duplicated between `parser.rs` and `check.rs`~~ FIXED
+
+**Fix:** Extracted `format_ipv6_expanded()` into `util.rs`. Both `parser.rs`
+and `check.rs` (via `normalize_ip()`) now call the shared function.
+
+---
+
+### ~~33. `TrustStore::add_pem_directory()` uses overly broad filename matching~~ FIXED
+
+**Fix:** Extracted `is_pem_cert_file()` function that checks for `.pem`,
+`.crt`, `.cer` extensions (case-insensitive) or single-digit extensions
+(OpenSSL hash-linked files). Validates the extension is exactly one digit
+character, not just any filename ending in a digit.
+
+---
+
+### ~~34. Inconsistent cert file extension filtering across trust store methods~~ FIXED
+
+**Fix:** Both `TrustStore::system()` and `add_pem_directory()` now use the
+shared `is_pem_cert_file()` function, ensuring consistent extension filtering
+(`.pem`, `.crt`, `.cer`, and OpenSSL hash-linked single-digit extensions).
+
+---
+
+### ~~35. `verify_chain_with_options()` is ~460 lines and could be decomposed~~ FIXED
+
+**Fix:** Decomposed into 14 focused helper functions: `check_chain_time_validity()`,
+`check_chain_basic_constraints()`, `check_chain_critical_extensions()`,
+`check_chain_duplicate_extensions()`, `check_chain_name_constraint_placement()`,
+`check_chain_name_constraints()`, `check_chain_key_cert_sign()`,
+`check_chain_signatures()`, `verify_trust_anchoring()`, `check_trusted_root()`,
+`check_leaf_purpose()`, `check_leaf_hostname()`, `check_leaf_email()`,
+`check_leaf_ip()`, and `check_crl_chain()`. Main function reduced from ~460
+lines to ~110 lines.

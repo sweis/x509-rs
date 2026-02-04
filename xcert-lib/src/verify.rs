@@ -18,6 +18,30 @@ use x509_parser::prelude::*;
 /// Maximum chain depth to prevent infinite loops during chain building.
 const MAX_CHAIN_DEPTH: usize = 32;
 
+/// Well-known CA bundle file paths, in order of preference.
+const KNOWN_CA_BUNDLE_PATHS: &[&str] = &[
+    "/etc/ssl/certs/ca-certificates.crt", // Debian/Ubuntu
+    "/etc/pki/tls/certs/ca-bundle.crt",   // RHEL/CentOS/Fedora
+    "/etc/ssl/ca-bundle.pem",             // openSUSE
+    "/etc/ssl/cert.pem",                  // macOS, Alpine
+];
+
+/// Well-known CA certificate directory paths.
+const KNOWN_CA_DIR_PATHS: &[&str] = &["/etc/ssl/certs"];
+
+/// Check if a file looks like a PEM certificate file for trust store loading.
+///
+/// Matches `.pem`, `.crt`, `.cer` extensions and OpenSSL hash-linked files
+/// (`XXXXXXXX.N` where the extension is a single digit).
+fn is_pem_cert_file(path: &std::path::Path) -> bool {
+    let ext = match path.extension().and_then(|e| e.to_str()) {
+        Some(e) => e,
+        None => return false,
+    };
+    matches!(ext, "pem" | "crt" | "cer")
+        || (ext.len() == 1 && ext.bytes().next().is_some_and(|b| b.is_ascii_digit()))
+}
+
 /// Result of certificate chain verification.
 #[derive(Debug, Clone, Serialize)]
 pub struct VerificationResult {
@@ -163,31 +187,17 @@ impl TrustStore {
     /// matching the same locations OpenSSL searches:
     /// 1. `SSL_CERT_FILE` environment variable
     /// 2. Path discovered by `openssl-probe`
-    /// 3. `/etc/ssl/certs/ca-certificates.crt` (Debian/Ubuntu)
-    /// 4. `/etc/pki/tls/certs/ca-bundle.crt` (RHEL/CentOS/Fedora)
-    /// 5. `/etc/ssl/ca-bundle.pem` (openSUSE)
-    /// 6. `/etc/ssl/cert.pem` (macOS, Alpine)
-    /// 7. `/etc/ssl/certs` directory (individual cert files)
+    /// 3. Well-known bundle file paths ([`KNOWN_CA_BUNDLE_PATHS`])
+    /// 4. `SSL_CERT_DIR` environment variable
+    /// 5. Directory discovered by `openssl-probe`
+    /// 6. Well-known certificate directories ([`KNOWN_CA_DIR_PATHS`])
     pub fn system() -> Result<Self, XcertError> {
         let mut store = TrustStore::new();
 
-        // Use openssl-probe to discover the system trust store
-        let probe = openssl_probe::probe();
-
-        // Build candidate list: env var first, then openssl-probe, then known paths
-        let mut bundle_paths: Vec<Option<String>> = vec![std::env::var("SSL_CERT_FILE").ok()];
-        if let Some(probe_file) = probe.cert_file {
-            bundle_paths.push(Some(probe_file.to_string_lossy().into_owned()));
-        }
-        bundle_paths.extend([
-            Some("/etc/ssl/certs/ca-certificates.crt".into()),
-            Some("/etc/pki/tls/certs/ca-bundle.crt".into()),
-            Some("/etc/ssl/ca-bundle.pem".into()),
-            Some("/etc/ssl/cert.pem".into()),
-        ]);
-
-        for path in bundle_paths.iter().flatten() {
-            if let Ok(data) = std::fs::read(path) {
+        // Try file-based CA bundle (delegates to find_system_ca_bundle for path
+        // discovery, sharing the same path list and openssl-probe logic).
+        if let Some(bundle_path) = find_system_ca_bundle() {
+            if let Ok(data) = std::fs::read(&bundle_path) {
                 let added = store.add_pem_bundle(&data)?;
                 if added > 0 {
                     return Ok(store);
@@ -196,27 +206,19 @@ impl TrustStore {
         }
 
         // Try directory of individual certs
+        let probe = openssl_probe::probe();
         let mut dir_paths: Vec<Option<String>> = vec![std::env::var("SSL_CERT_DIR").ok()];
         for probe_dir in probe.cert_dir {
             dir_paths.push(Some(probe_dir.to_string_lossy().into_owned()));
         }
-        dir_paths.push(Some("/etc/ssl/certs".into()));
+        for known in KNOWN_CA_DIR_PATHS {
+            dir_paths.push(Some((*known).into()));
+        }
 
         for dir in dir_paths.iter().flatten() {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path
-                        .extension()
-                        .map(|e| e == "pem" || e == "crt")
-                        .unwrap_or(false)
-                    {
-                        if let Ok(data) = std::fs::read(&path) {
-                            let _ = store.add_pem_bundle(&data);
-                        }
-                    }
-                }
-                if !store.is_empty() {
+            let dir_path = std::path::Path::new(dir);
+            if let Ok(added) = store.add_pem_directory(dir_path) {
+                if added > 0 {
                     return Ok(store);
                 }
             }
@@ -280,7 +282,9 @@ impl TrustStore {
 
     /// Load certificates from a directory of PEM files (like OpenSSL's -CApath).
     ///
-    /// Reads all `.pem`, `.crt`, and `.0`-`.9` files in the directory.
+    /// Reads all `.pem`, `.crt`, `.cer`, and OpenSSL hash-linked files in the
+    /// directory. Hash-linked files follow the pattern `XXXXXXXX.N` where N is
+    /// a single digit (e.g., `a1b2c3d4.0`).
     pub fn add_pem_directory(&mut self, dir: &std::path::Path) -> Result<usize, XcertError> {
         let mut total = 0;
         let entries = std::fs::read_dir(dir).map_err(|e| {
@@ -293,12 +297,8 @@ impl TrustStore {
             let entry = entry?;
             let path = entry.path();
             if path.is_file() {
-                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let is_cert_file = name.ends_with(".pem")
-                    || name.ends_with(".crt")
-                    || name.ends_with(".cer")
-                    || name.chars().last().is_some_and(|c| c.is_ascii_digit());
-                if is_cert_file {
+                let is_cert = is_pem_cert_file(&path);
+                if is_cert {
                     if let Ok(data) = std::fs::read(&path) {
                         if let Ok(added) = self.add_pem_bundle(&data) {
                             total += added;
@@ -445,8 +445,6 @@ pub fn verify_chain_with_options(
     }
 
     let max_depth = options.verify_depth.unwrap_or(MAX_CHAIN_DEPTH);
-    // max_chain_depth counts the maximum number of intermediate certificates
-    // (excluding the leaf and the trust anchor root).
     let num_intermediates = chain_der.len().saturating_sub(1);
     if num_intermediates > max_depth {
         return Err(XcertError::VerifyError(format!(
@@ -454,9 +452,6 @@ pub fn verify_chain_with_options(
             max_depth, num_intermediates
         )));
     }
-
-    let mut errors = Vec::new();
-    let mut chain_info = Vec::new();
 
     let now_ts = options.at_time.unwrap_or_else(|| {
         SystemTime::now()
@@ -481,141 +476,226 @@ pub fn verify_chain_with_options(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    // Build chain info
-    for (i, (_, x509)) in parsed.iter().enumerate() {
-        chain_info.push(ChainCertInfo {
+    // Pre-compute subject and issuer strings for all certificates (#29).
+    let subjects: Vec<String> = parsed
+        .iter()
+        .map(|(_, x509)| crate::parser::build_dn(x509.subject()).to_oneline())
+        .collect();
+    let issuers: Vec<String> = parsed
+        .iter()
+        .map(|(_, x509)| crate::parser::build_dn(x509.issuer()).to_oneline())
+        .collect();
+
+    let mut chain_info: Vec<ChainCertInfo> = subjects
+        .iter()
+        .zip(issuers.iter())
+        .enumerate()
+        .map(|(i, (subject, issuer))| ChainCertInfo {
             depth: i,
-            subject: crate::parser::build_dn(x509.subject()).to_oneline(),
-            issuer: crate::parser::build_dn(x509.issuer()).to_oneline(),
-        });
+            subject: subject.clone(),
+            issuer: issuer.clone(),
+        })
+        .collect();
+
+    let mut errors = Vec::new();
+
+    // Individual verification steps, each in its own helper function.
+    if options.check_time {
+        check_chain_time_validity(&parsed, &subjects, now_ts, &mut errors);
+    }
+    check_chain_basic_constraints(&parsed, &subjects, &mut errors);
+    check_chain_critical_extensions(&parsed, &subjects, &mut errors);
+    check_chain_duplicate_extensions(&parsed, &subjects, &mut errors);
+    check_chain_name_constraint_placement(&parsed, &subjects, &mut errors);
+    check_chain_name_constraints(&parsed, &mut errors);
+    check_chain_key_cert_sign(&parsed, &subjects, &mut errors);
+    check_chain_signatures(&parsed, &subjects, &mut errors);
+
+    // Trust anchoring
+    let trusted_root_der = verify_trust_anchoring(
+        &parsed,
+        &subjects,
+        trust_store,
+        options,
+        &mut chain_info,
+        &mut errors,
+    )?;
+
+    // Trusted root validation
+    if let Some(ref root_der) = trusted_root_der {
+        check_trusted_root(root_der, &parsed, options, now_ts, &mut errors);
     }
 
-    // Check validity dates for all certificates (unless disabled)
-    if options.check_time {
-        for (i, (_, x509)) in parsed.iter().enumerate() {
-            let not_before = x509.validity().not_before.timestamp();
-            let not_after = x509.validity().not_after.timestamp();
-            let subject = crate::parser::build_dn(x509.subject()).to_oneline();
+    // Leaf certificate checks
+    check_leaf_purpose(&parsed, &subjects, options, &mut errors);
+    check_leaf_hostname(&parsed, hostname, options, &mut errors);
+    check_leaf_email(&parsed, options, &mut errors);
+    check_leaf_ip(&parsed, options, &mut errors);
 
-            if now_ts < not_before {
-                errors.push(format!(
-                    "certificate at depth {} ({}) is not yet valid",
-                    i, subject
-                ));
-            }
-            if now_ts > not_after {
-                errors.push(format!(
-                    "certificate at depth {} ({}) has expired",
-                    i, subject
-                ));
-            }
+    // CRL revocation
+    check_crl_chain(
+        &parsed,
+        &subjects,
+        options,
+        &trusted_root_der,
+        now_ts,
+        &mut errors,
+    );
+
+    Ok(VerificationResult {
+        is_valid: errors.is_empty(),
+        chain: chain_info,
+        errors,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Helper functions for verify_chain_with_options (#35)
+// ---------------------------------------------------------------------------
+
+/// Check validity dates for all certificates in the chain.
+#[allow(clippy::indexing_slicing)] // subjects[i] is safe: same length as parsed
+fn check_chain_time_validity(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    now_ts: i64,
+    errors: &mut Vec<String>,
+) {
+    for (i, (_, x509)) in parsed.iter().enumerate() {
+        let not_before = x509.validity().not_before.timestamp();
+        let not_after = x509.validity().not_after.timestamp();
+        if now_ts < not_before {
+            errors.push(format!(
+                "certificate at depth {} ({}) is not yet valid",
+                i, subjects[i]
+            ));
+        }
+        if now_ts > not_after {
+            errors.push(format!(
+                "certificate at depth {} ({}) has expired",
+                i, subjects[i]
+            ));
         }
     }
+}
 
-    // Check basic constraints for CA certificates (all except leaf at depth 0)
+/// Check BasicConstraints for CA certificates (all except leaf at depth 0).
+#[allow(clippy::indexing_slicing)] // subjects[i] is safe: same length as parsed
+fn check_chain_basic_constraints(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    errors: &mut Vec<String>,
+) {
     for (i, (_, x509)) in parsed.iter().enumerate().skip(1) {
-        let subject = crate::parser::build_dn(x509.subject()).to_oneline();
         let bc = x509.basic_constraints().ok().flatten().map(|bc| bc.value);
-
         match bc {
             Some(constraints) => {
                 if !constraints.ca {
                     errors.push(format!(
                         "certificate at depth {} ({}) is not a CA but is used as issuer",
-                        i, subject
+                        i, subjects[i]
                     ));
                 }
-                // Check pathLenConstraint: the number of intermediate CAs below
-                // this CA must not exceed the constraint value. Depth i means
-                // there are (i - 1) intermediates between the leaf and this CA.
                 if let Some(pathlen) = constraints.path_len_constraint {
                     let intermediates_below = i.saturating_sub(1) as u32;
                     if intermediates_below > pathlen {
                         errors.push(format!(
                             "certificate at depth {} ({}) path length constraint violated \
                              (pathlen={}, intermediates below={})",
-                            i, subject, pathlen, intermediates_below
+                            i, subjects[i], pathlen, intermediates_below
                         ));
                     }
                 }
             }
             None => {
-                // No BasicConstraints extension. For v3 certificates this means
-                // the certificate is not a CA. For v1/v2 certs we allow it for
-                // compatibility (matching OpenSSL behavior).
                 let version = x509.version().0;
                 if version >= 2 {
                     errors.push(format!(
                         "certificate at depth {} ({}) is not a CA but is used as issuer",
-                        i, subject
+                        i, subjects[i]
                     ));
                 }
             }
         }
     }
+}
 
-    // RFC 5280 Section 4.2: Reject certificates with unknown critical extensions.
-    // An implementation MUST reject a certificate if it encounters a critical
-    // extension it does not recognize.
+/// RFC 5280 Section 4.2: Reject certificates with unknown critical extensions.
+#[allow(clippy::indexing_slicing)] // subjects[i] is safe: same length as parsed
+fn check_chain_critical_extensions(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    errors: &mut Vec<String>,
+) {
     for (i, (_, x509)) in parsed.iter().enumerate() {
-        let subject = crate::parser::build_dn(x509.subject()).to_oneline();
         for ext in x509.extensions() {
             if ext.critical && !is_known_extension(ext.oid.to_id_string().as_str()) {
                 errors.push(format!(
                     "certificate at depth {} ({}) has unrecognized critical extension {}",
-                    i, subject, ext.oid
+                    i, subjects[i], ext.oid
                 ));
             }
         }
     }
+}
 
-    // RFC 5280 Section 4.2: A certificate MUST NOT include more than one
-    // instance of a particular extension.
+/// RFC 5280 Section 4.2: A certificate MUST NOT include more than one
+/// instance of a particular extension.
+#[allow(clippy::indexing_slicing)] // subjects[i] is safe: same length as parsed
+fn check_chain_duplicate_extensions(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    errors: &mut Vec<String>,
+) {
     for (i, (_, x509)) in parsed.iter().enumerate() {
         let mut seen = HashSet::new();
         for ext in x509.extensions() {
             if !seen.insert(ext.oid.to_id_string()) {
-                let subject = crate::parser::build_dn(x509.subject()).to_oneline();
                 errors.push(format!(
                     "certificate at depth {} ({}) has duplicate extension {}",
-                    i, subject, ext.oid
+                    i, subjects[i], ext.oid
                 ));
-                break; // one duplicate error per certificate is enough
+                break;
             }
         }
     }
+}
 
-    // RFC 5280 Section 4.2.1.10: Name Constraints MUST NOT appear in EE
-    // certificates and MUST be critical when present.
+/// RFC 5280 Section 4.2.1.10: Name Constraints MUST NOT appear in EE
+/// certificates and MUST be critical when present.
+#[allow(clippy::indexing_slicing)] // subjects has same length as parsed
+fn check_chain_name_constraint_placement(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    errors: &mut Vec<String>,
+) {
     for (i, (_, x509)) in parsed.iter().enumerate() {
         let is_leaf = i == 0;
         for ext in x509.extensions() {
             if ext.oid.to_id_string() == "2.5.29.30" {
-                let subject = crate::parser::build_dn(x509.subject()).to_oneline();
                 if is_leaf {
                     errors.push(format!(
                         "certificate at depth {} ({}) is an end-entity but contains \
                          Name Constraints extension",
-                        i, subject
+                        i, subjects[i]
                     ));
                 } else if !ext.critical {
                     errors.push(format!(
                         "certificate at depth {} ({}) has Name Constraints extension \
                          that is not marked critical",
-                        i, subject
+                        i, subjects[i]
                     ));
                 }
             }
         }
     }
+}
 
-    // RFC 5280 Section 4.2.1.10: Check Name Constraints for CA certificates.
-    // Each CA with Name Constraints restricts the names in all certificates
-    // it issues (directly or transitively).
+/// RFC 5280 Section 4.2.1.10: Check Name Constraints for CA certificates.
+fn check_chain_name_constraints(parsed: &[(&[u8], X509Certificate)], errors: &mut Vec<String>) {
     for (ca_depth, (_, ca_cert)) in parsed.iter().enumerate().skip(1) {
         if let Ok(Some(nc_ext)) = ca_cert.name_constraints() {
             let nc = &nc_ext.value;
-            // Check all certificates below this CA in the chain
             for (child_depth, (_, child_cert)) in parsed.iter().enumerate() {
                 if child_depth >= ca_depth {
                     break;
@@ -625,45 +705,66 @@ pub fn verify_chain_with_options(
             }
         }
     }
+}
 
-    // RFC 5280 Section 4.2.1.3: CA certificates must have keyCertSign in
-    // Key Usage when the extension is present.
+/// RFC 5280 Section 4.2.1.3: CA certificates must have keyCertSign.
+#[allow(clippy::indexing_slicing)] // subjects has same length as parsed
+fn check_chain_key_cert_sign(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    errors: &mut Vec<String>,
+) {
     for (i, (_, x509)) in parsed.iter().enumerate().skip(1) {
         if let Ok(Some(ku)) = x509.key_usage() {
             if !ku.value.key_cert_sign() {
-                let subject = crate::parser::build_dn(x509.subject()).to_oneline();
                 errors.push(format!(
-                    "certificate at depth {} ({}) is a CA but Key Usage does not include keyCertSign",
-                    i, subject
+                    "certificate at depth {} ({}) is a CA but Key Usage does not \
+                     include keyCertSign",
+                    i, subjects[i]
                 ));
             }
         }
     }
+}
 
-    // Verify signatures along the chain
-    // Each cert should be signed by the next cert in the chain
-    for (child, parent) in parsed.iter().zip(parsed.iter().skip(1)) {
+/// Verify signatures along the chain (each cert signed by the next).
+#[allow(clippy::indexing_slicing)] // subjects has same length as parsed
+fn check_chain_signatures(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    errors: &mut Vec<String>,
+) {
+    for (i, (child, parent)) in parsed.iter().zip(parsed.iter().skip(1)).enumerate() {
         let (_, child_x509) = child;
         let (_, parent_x509) = parent;
-
         if let Err(e) = child_x509.verify_signature(Some(parent_x509.public_key())) {
             errors.push(format!(
                 "signature verification failed ({} -> {}): {}",
-                crate::parser::build_dn(child_x509.subject()).to_oneline(),
-                crate::parser::build_dn(parent_x509.subject()).to_oneline(),
+                subjects[i],
+                subjects[i + 1],
                 e
             ));
         }
     }
+}
 
-    // Verify trust anchoring.
-    // With partial_chain, any certificate in the chain that is directly in the
-    // trust store satisfies the anchoring requirement.
+/// Verify trust anchoring: find the root in the trust store.
+///
+/// Returns `Some(root_der)` if a trusted root was found, `None` otherwise.
+#[allow(clippy::indexing_slicing)] // subjects has same length as parsed
+fn verify_trust_anchoring(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    trust_store: &TrustStore,
+    options: &VerifyOptions,
+    chain_info: &mut Vec<ChainCertInfo>,
+    errors: &mut Vec<String>,
+) -> Result<Option<Vec<u8>>, XcertError> {
     let mut trust_anchored = false;
     let mut trusted_root_der: Option<Vec<u8>> = None;
 
     if options.partial_chain {
-        for (der, _) in &parsed {
+        for (der, _) in parsed {
             if trust_store.contains(der) {
                 trust_anchored = true;
                 break;
@@ -673,29 +774,24 @@ pub fn verify_chain_with_options(
 
     if !trust_anchored {
         let Some((last_der, last_x509)) = parsed.last() else {
-            // Unreachable: we checked chain_der.is_empty() at function entry
             return Err(XcertError::VerifyError("empty certificate chain".into()));
         };
-        let last_subject = crate::parser::build_dn(last_x509.subject()).to_oneline();
+        let last_idx = parsed.len() - 1;
 
-        // Check if the last cert in the chain is self-signed (i.e., it's a root)
         let is_self_signed = last_x509.subject().as_raw() == last_x509.issuer().as_raw()
             && last_x509.verify_signature(None).is_ok();
 
         if is_self_signed {
-            // The chain includes the root - check if it's in the trust store
             if trust_store.contains(last_der) {
                 trusted_root_der = Some(last_der.to_vec());
             } else {
                 errors.push(format!(
                     "root certificate ({}) is not in the trust store",
-                    last_subject
+                    subjects[last_idx]
                 ));
             }
         } else {
-            // The chain doesn't include the root - find it in the trust store
             let issuer_raw = last_x509.issuer().as_raw();
-
             if let Some(candidates) = trust_store.find_by_subject_raw(issuer_raw) {
                 for root_der in candidates {
                     if let Ok((_, root_x509)) = X509Certificate::from_der(root_der) {
@@ -703,7 +799,6 @@ pub fn verify_chain_with_options(
                             .verify_signature(Some(root_x509.public_key()))
                             .is_ok()
                         {
-                            // Add the trusted root to the chain info
                             chain_info.push(ChainCertInfo {
                                 depth: parsed.len(),
                                 subject: crate::parser::build_dn(root_x509.subject()).to_oneline(),
@@ -718,187 +813,216 @@ pub fn verify_chain_with_options(
             }
 
             if !trust_anchored {
+                let last_issuer = crate::parser::build_dn(last_x509.issuer()).to_oneline();
                 errors.push(format!(
                     "unable to find trusted root for issuer: {}",
-                    crate::parser::build_dn(last_x509.issuer()).to_oneline()
+                    last_issuer
                 ));
             }
         }
     }
 
-    // Check the trusted root from the trust store: time validity, Name
-    // Constraints, unknown critical extensions, and duplicate extensions.
-    if let Some(ref root_der) = trusted_root_der {
-        if let Ok((_, root_x509)) = X509Certificate::from_der(root_der) {
-            let root_subject = crate::parser::build_dn(root_x509.subject()).to_oneline();
-            let root_depth = parsed.len(); // virtual depth of the trust store root
+    Ok(trusted_root_der)
+}
 
-            // RFC 5280: Check validity dates for the trusted root.
-            if options.check_time {
-                let not_before = root_x509.validity().not_before.timestamp();
-                let not_after = root_x509.validity().not_after.timestamp();
-                if now_ts < not_before {
-                    errors.push(format!("trusted root ({}) is not yet valid", root_subject));
-                }
-                if now_ts > not_after {
-                    errors.push(format!("trusted root ({}) has expired", root_subject));
-                }
-            }
+/// Validate the trusted root: time, critical extensions, Name Constraints.
+fn check_trusted_root(
+    root_der: &[u8],
+    parsed: &[(&[u8], X509Certificate)],
+    options: &VerifyOptions,
+    now_ts: i64,
+    errors: &mut Vec<String>,
+) {
+    let Ok((_, root_x509)) = X509Certificate::from_der(root_der) else {
+        return;
+    };
+    let root_subject = crate::parser::build_dn(root_x509.subject()).to_oneline();
+    let root_depth = parsed.len();
 
-            // Check unknown critical extensions on the trusted root.
-            for ext in root_x509.extensions() {
-                if ext.critical && !is_known_extension(ext.oid.to_id_string().as_str()) {
-                    errors.push(format!(
-                        "trusted root ({}) has unrecognized critical extension {}",
-                        root_subject, ext.oid
-                    ));
-                }
-            }
-
-            // Check Name Constraints from the trusted root against the chain.
-            // Also enforce that NC MUST be critical (RFC 5280 Section 4.2.1.10).
-            for ext in root_x509.extensions() {
-                if ext.oid.to_id_string() == "2.5.29.30" && !ext.critical {
-                    errors.push(format!(
-                        "trusted root ({}) has Name Constraints extension \
-                         that is not marked critical",
-                        root_subject
-                    ));
-                }
-            }
-            if let Ok(Some(nc_ext)) = root_x509.name_constraints() {
-                let nc = &nc_ext.value;
-                for (child_depth, (_, child_cert)) in parsed.iter().enumerate() {
-                    let nc_errors = check_name_constraints(nc, child_cert, child_depth, root_depth);
-                    errors.extend(nc_errors);
-                }
-            }
+    if options.check_time {
+        let not_before = root_x509.validity().not_before.timestamp();
+        let not_after = root_x509.validity().not_after.timestamp();
+        if now_ts < not_before {
+            errors.push(format!("trusted root ({}) is not yet valid", root_subject));
+        }
+        if now_ts > not_after {
+            errors.push(format!("trusted root ({}) has expired", root_subject));
         }
     }
 
-    // Check Extended Key Usage on the leaf certificate (if purpose is specified)
-    if let Some(ref required_oid) = options.purpose {
-        let Some((_, leaf)) = parsed.first() else {
-            return Err(XcertError::VerifyError("empty certificate chain".into()));
-        };
-        if let Ok(Some(eku)) = leaf.extended_key_usage() {
-            let eku_val = &eku.value;
-            // Map well-known OIDs to their boolean flags
-            // RFC 5280 Section 4.2.1.12: anyExtendedKeyUsage satisfies
-            // any specific purpose requirement.
-            let has_eku = eku_val.any
-                || match required_oid.as_str() {
-                    "1.3.6.1.5.5.7.3.1" => eku_val.server_auth,
-                    "1.3.6.1.5.5.7.3.2" => eku_val.client_auth,
-                    "1.3.6.1.5.5.7.3.3" => eku_val.code_signing,
-                    "1.3.6.1.5.5.7.3.4" => eku_val.email_protection,
-                    "1.3.6.1.5.5.7.3.8" => eku_val.time_stamping,
-                    "1.3.6.1.5.5.7.3.9" => eku_val.ocsp_signing,
-                    "2.5.29.37.0" => true,
-                    _ => eku_val
-                        .other
-                        .iter()
-                        .any(|oid| oid.to_id_string() == *required_oid),
-                };
-            if !has_eku {
-                let leaf_subject = crate::parser::build_dn(leaf.subject()).to_oneline();
-                errors.push(format!(
-                    "leaf certificate ({}) does not have required EKU {}",
-                    leaf_subject, required_oid
-                ));
-            }
+    for ext in root_x509.extensions() {
+        if ext.critical && !is_known_extension(ext.oid.to_id_string().as_str()) {
+            errors.push(format!(
+                "trusted root ({}) has unrecognized critical extension {}",
+                root_subject, ext.oid
+            ));
         }
     }
 
-    // Check hostname against leaf certificate (if requested).
-    // Skip hostname check when the hostname is an IP address that will be
-    // verified via verify_ip instead (avoids false failure from DNS matching).
-    if let Some(host) = hostname {
-        let ip_handled = options.verify_ip.as_deref() == Some(host);
-        if !ip_handled {
-            let Some((_, leaf)) = parsed.first() else {
-                return Err(XcertError::VerifyError("empty certificate chain".into()));
+    for ext in root_x509.extensions() {
+        if ext.oid.to_id_string() == "2.5.29.30" && !ext.critical {
+            errors.push(format!(
+                "trusted root ({}) has Name Constraints extension \
+                 that is not marked critical",
+                root_subject
+            ));
+        }
+    }
+    if let Ok(Some(nc_ext)) = root_x509.name_constraints() {
+        let nc = &nc_ext.value;
+        for (child_depth, (_, child_cert)) in parsed.iter().enumerate() {
+            let nc_errors = check_name_constraints(nc, child_cert, child_depth, root_depth);
+            errors.extend(nc_errors);
+        }
+    }
+}
+
+/// Check EKU purpose on the leaf certificate.
+#[allow(clippy::indexing_slicing)] // subjects has same length as parsed
+fn check_leaf_purpose(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    options: &VerifyOptions,
+    errors: &mut Vec<String>,
+) {
+    let Some(ref required_oid) = options.purpose else {
+        return;
+    };
+    let Some((_, leaf)) = parsed.first() else {
+        return;
+    };
+    if let Ok(Some(eku)) = leaf.extended_key_usage() {
+        let eku_val = &eku.value;
+        let has_eku = eku_val.any
+            || match required_oid.as_str() {
+                "1.3.6.1.5.5.7.3.1" => eku_val.server_auth,
+                "1.3.6.1.5.5.7.3.2" => eku_val.client_auth,
+                "1.3.6.1.5.5.7.3.3" => eku_val.code_signing,
+                "1.3.6.1.5.5.7.3.4" => eku_val.email_protection,
+                "1.3.6.1.5.5.7.3.8" => eku_val.time_stamping,
+                "1.3.6.1.5.5.7.3.9" => eku_val.ocsp_signing,
+                "2.5.29.37.0" => true,
+                _ => eku_val
+                    .other
+                    .iter()
+                    .any(|oid| oid.to_id_string() == *required_oid),
             };
-            if !verify_hostname(leaf, host) {
-                let san_names = extract_san_dns_names(leaf);
-                let cn = extract_cn(leaf);
-                let mut names: Vec<String> = san_names;
-                if let Some(cn_val) = cn {
-                    if names.is_empty() {
-                        names.push(cn_val);
-                    }
-                }
-                errors.push(format!(
-                    "hostname '{}' does not match certificate names: [{}]",
-                    host,
-                    names.join(", ")
-                ));
+        if !has_eku {
+            errors.push(format!(
+                "leaf certificate ({}) does not have required EKU {}",
+                subjects[0], required_oid
+            ));
+        }
+    }
+}
+
+/// Check hostname against leaf certificate (if requested).
+fn check_leaf_hostname(
+    parsed: &[(&[u8], X509Certificate)],
+    hostname: Option<&str>,
+    options: &VerifyOptions,
+    errors: &mut Vec<String>,
+) {
+    let Some(host) = hostname else { return };
+    let ip_handled = options.verify_ip.as_deref() == Some(host);
+    if ip_handled {
+        return;
+    }
+    let Some((_, leaf)) = parsed.first() else {
+        return;
+    };
+    if !verify_hostname(leaf, host) {
+        let san_names = extract_san_dns_names(leaf);
+        let cn = extract_cn(leaf);
+        let mut names: Vec<String> = san_names;
+        if let Some(cn_val) = cn {
+            if names.is_empty() {
+                names.push(cn_val);
             }
         }
+        errors.push(format!(
+            "hostname '{}' does not match certificate names: [{}]",
+            host,
+            names.join(", ")
+        ));
+    }
+}
+
+/// Check email against leaf certificate (if requested).
+fn check_leaf_email(
+    parsed: &[(&[u8], X509Certificate)],
+    options: &VerifyOptions,
+    errors: &mut Vec<String>,
+) {
+    let Some(ref email) = options.verify_email else {
+        return;
+    };
+    let Some((_, leaf)) = parsed.first() else {
+        return;
+    };
+    if !verify_email(leaf, email) {
+        errors.push(format!("email '{}' does not match certificate", email));
+    }
+}
+
+/// Check IP address against leaf certificate (if requested).
+fn check_leaf_ip(
+    parsed: &[(&[u8], X509Certificate)],
+    options: &VerifyOptions,
+    errors: &mut Vec<String>,
+) {
+    let Some(ref ip) = options.verify_ip else {
+        return;
+    };
+    let Some((_, leaf)) = parsed.first() else {
+        return;
+    };
+    if !verify_ip(leaf, ip) {
+        errors.push(format!("IP address '{}' does not match certificate", ip));
+    }
+}
+
+/// CRL-based revocation checking.
+#[allow(clippy::indexing_slicing)] // subjects/parsed have same length; range is bounded
+fn check_crl_chain(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    options: &VerifyOptions,
+    trusted_root_der: &Option<Vec<u8>>,
+    now_ts: i64,
+    errors: &mut Vec<String>,
+) {
+    if options.crl_ders.is_empty() || !(options.crl_check_leaf || options.crl_check_all) {
+        return;
     }
 
-    // Check email against leaf certificate SAN/subject (if requested)
-    if let Some(ref email) = options.verify_email {
-        let Some((_, leaf)) = parsed.first() else {
-            return Err(XcertError::VerifyError("empty certificate chain".into()));
-        };
-        if !verify_email(leaf, email) {
-            errors.push(format!("email '{}' does not match certificate", email));
-        }
-    }
+    let check_range = if options.crl_check_all {
+        0..parsed.len()
+    } else {
+        0..1
+    };
 
-    // Check IP address against leaf certificate SAN (if requested)
-    if let Some(ref ip) = options.verify_ip {
-        let Some((_, leaf)) = parsed.first() else {
-            return Err(XcertError::VerifyError("empty certificate chain".into()));
-        };
-        if !verify_ip(leaf, ip) {
-            errors.push(format!("IP address '{}' does not match certificate", ip));
-        }
-    }
+    let trusted_root_parsed = trusted_root_der
+        .as_deref()
+        .and_then(|der| X509Certificate::from_der(der).ok().map(|(_, c)| c));
 
-    // CRL-based revocation checking
-    if !options.crl_ders.is_empty() && (options.crl_check_leaf || options.crl_check_all) {
-        let check_range = if options.crl_check_all {
-            0..parsed.len()
+    for i in check_range {
+        let (_, cert) = &parsed[i];
+        let issuer = if i + 1 < parsed.len() {
+            Some(&parsed[i + 1].1)
+        } else if let Some(ref root) = trusted_root_parsed {
+            Some(root)
         } else {
-            // crl_check_leaf: only check the leaf (depth 0)
-            0..1
+            Some(cert)
         };
 
-        // Pre-parse trusted root for CRL signature verification when
-        // the root is not in the provided chain but was found in the trust store
-        let trusted_root_parsed = trusted_root_der
-            .as_deref()
-            .and_then(|der| X509Certificate::from_der(der).ok().map(|(_, c)| c));
-
-        for i in check_range {
-            let (_, cert) = &parsed[i];
-            // Find the issuer for CRL signature verification
-            let issuer = if i + 1 < parsed.len() {
-                Some(&parsed[i + 1].1)
-            } else if let Some(ref root) = trusted_root_parsed {
-                Some(root)
-            } else {
-                // Self-signed root: use itself as CRL issuer
-                Some(cert)
-            };
-
-            if let Some(reason) = check_crl_revocation(cert, &options.crl_ders, issuer, now_ts) {
-                let subject = crate::parser::build_dn(cert.subject()).to_oneline();
-                errors.push(format!(
-                    "certificate at depth {} ({}) has been revoked (reason: {})",
-                    i, subject, reason
-                ));
-            }
+        if let Some(reason) = check_crl_revocation(cert, &options.crl_ders, issuer, now_ts) {
+            errors.push(format!(
+                "certificate at depth {} ({}) has been revoked (reason: {})",
+                i, subjects[i], reason
+            ));
         }
     }
-
-    Ok(VerificationResult {
-        is_valid: errors.is_empty(),
-        chain: chain_info,
-        errors,
-    })
 }
 
 /// Convenience function: parse a PEM chain and verify it against a trust store.
@@ -979,9 +1103,19 @@ pub fn verify_with_untrusted(
 
 /// Find the system CA bundle path (same location OpenSSL uses).
 ///
-/// Uses `openssl-probe` to discover the platform's trust store.
-/// Falls back to common well-known paths.
+/// Checks, in order:
+/// 1. `SSL_CERT_FILE` environment variable
+/// 2. Path discovered by `openssl-probe`
+/// 3. Well-known bundle file paths ([`KNOWN_CA_BUNDLE_PATHS`])
 pub fn find_system_ca_bundle() -> Option<PathBuf> {
+    // Check environment variable first (matches OpenSSL behavior)
+    if let Ok(path) = std::env::var("SSL_CERT_FILE") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
     let probe = openssl_probe::probe();
     if let Some(file) = probe.cert_file {
         let path = PathBuf::from(&file);
@@ -990,14 +1124,8 @@ pub fn find_system_ca_bundle() -> Option<PathBuf> {
         }
     }
 
-    let candidates = [
-        "/etc/ssl/certs/ca-certificates.crt",
-        "/etc/pki/tls/certs/ca-bundle.crt",
-        "/etc/ssl/ca-bundle.pem",
-        "/etc/ssl/cert.pem",
-    ];
-    for path in &candidates {
-        let p = PathBuf::from(path);
+    for candidate in KNOWN_CA_BUNDLE_PATHS {
+        let p = PathBuf::from(candidate);
         if p.exists() {
             return Some(p);
         }
@@ -1009,23 +1137,12 @@ pub fn find_system_ca_bundle() -> Option<PathBuf> {
 ///
 /// Checks SAN DNS entries first, falls back to CN if no SAN DNS entries exist.
 /// Supports wildcard matching per RFC 6125.
+///
+/// Delegates to [`util::verify_hostname_match`] (shared with `check_host`).
 fn verify_hostname(cert: &X509Certificate, hostname: &str) -> bool {
-    let hostname_lower = hostname.to_ascii_lowercase();
-
-    let san_dns = extract_san_dns_names(cert);
-
-    if !san_dns.is_empty() {
-        return san_dns
-            .iter()
-            .any(|pattern| util::hostname_matches(pattern, &hostname_lower));
-    }
-
-    // Fall back to CN
-    if let Some(cn) = extract_cn(cert) {
-        return util::hostname_matches(&cn, &hostname_lower);
-    }
-
-    false
+    let dns_names = extract_san_dns_names(cert);
+    let cn = extract_cn(cert);
+    util::verify_hostname_match(&dns_names, cn.as_deref(), hostname)
 }
 
 /// Extract DNS names from the Subject Alternative Name extension.
@@ -1055,51 +1172,54 @@ fn extract_cn(cert: &X509Certificate) -> Option<String> {
 
 /// Verify that an email matches the leaf certificate's SAN email entries or
 /// subject emailAddress attribute.
+///
+/// Delegates to [`util::verify_email_match`] (shared with `check_email`).
 fn verify_email(cert: &X509Certificate, email: &str) -> bool {
-    let email_lower = email.to_ascii_lowercase();
+    let emails = extract_emails(cert);
+    util::verify_email_match(&emails, email)
+}
 
+/// Extract email addresses from SAN and subject emailAddress attribute.
+fn extract_emails(cert: &X509Certificate) -> Vec<String> {
+    let mut emails = Vec::new();
     if let Ok(Some(san)) = cert.subject_alternative_name() {
         for gn in &san.value.general_names {
-            if let GeneralName::RFC822Name(san_email) = gn {
-                if san_email.to_ascii_lowercase() == email_lower {
-                    return true;
-                }
+            if let GeneralName::RFC822Name(email) = gn {
+                emails.push(email.to_string());
             }
         }
     }
-
-    // Fall back to subject emailAddress (OID 1.2.840.113549.1.9.1)
     for rdn in cert.subject().iter() {
         for attr in rdn.iter() {
             if attr.attr_type().to_id_string() == "1.2.840.113549.1.9.1" {
                 if let Ok(val) = attr.as_str() {
-                    if val.to_ascii_lowercase() == email_lower {
-                        return true;
-                    }
+                    emails.push(val.to_string());
                 }
             }
         }
     }
-
-    false
+    emails
 }
 
 /// Verify that an IP address matches the leaf certificate's SAN IP entries.
+///
+/// Delegates to [`util::verify_ip_match`] (shared with `check_ip`).
 fn verify_ip(cert: &X509Certificate, ip: &str) -> bool {
-    let normalized = crate::check::normalize_ip(ip);
+    let san_ips = extract_san_ips(cert);
+    util::verify_ip_match(&san_ips, ip)
+}
 
+/// Extract IP address strings from the SAN extension.
+fn extract_san_ips(cert: &X509Certificate) -> Vec<String> {
+    let mut ips = Vec::new();
     if let Ok(Some(san)) = cert.subject_alternative_name() {
         for gn in &san.value.general_names {
             if let GeneralName::IPAddress(ip_bytes) = gn {
-                let san_ip = crate::parser::format_ip_bytes(ip_bytes);
-                if crate::check::normalize_ip(&san_ip) == normalized {
-                    return true;
-                }
+                ips.push(crate::parser::format_ip_bytes(ip_bytes));
             }
         }
     }
-
-    false
+    ips
 }
 
 // ---------------------------------------------------------------------------
@@ -1420,29 +1540,25 @@ pub fn parse_pem_crl(input: &[u8]) -> Result<Vec<Vec<u8>>, XcertError> {
 }
 
 /// Format a CRL revocation reason code as an RFC 5280-style string.
+///
+/// Matches on the underlying numeric value of the `ReasonCode` newtype
+/// (which wraps a `u8`), per RFC 5280 Section 5.3.1.
 fn format_crl_reason(rc: &x509_parser::x509::ReasonCode) -> String {
-    let debug = format!("{:?}", rc);
-    if debug.contains("KeyCompromise") {
-        "keyCompromise".into()
-    } else if debug.contains("CACompromise") || debug.contains("CaCompromise") {
-        "cACompromise".into()
-    } else if debug.contains("AffiliationChanged") {
-        "affiliationChanged".into()
-    } else if debug.contains("Superseded") {
-        "superseded".into()
-    } else if debug.contains("CessationOfOperation") {
-        "cessationOfOperation".into()
-    } else if debug.contains("CertificateHold") {
-        "certificateHold".into()
-    } else if debug.contains("RemoveFromCRL") || debug.contains("RemoveFromCrl") {
-        "removeFromCRL".into()
-    } else if debug.contains("PrivilegeWithdrawn") {
-        "privilegeWithdrawn".into()
-    } else if debug.contains("AACompromise") || debug.contains("AaCompromise") {
-        "aACompromise".into()
-    } else {
-        "unspecified".into()
+    match rc.0 {
+        0 => "unspecified",
+        1 => "keyCompromise",
+        2 => "cACompromise",
+        3 => "affiliationChanged",
+        4 => "superseded",
+        5 => "cessationOfOperation",
+        6 => "certificateHold",
+        // 7 is unused per RFC 5280
+        8 => "removeFromCRL",
+        9 => "privilegeWithdrawn",
+        10 => "aACompromise",
+        _ => "unspecified",
     }
+    .into()
 }
 
 /// Check whether a certificate has been revoked according to the given CRLs.

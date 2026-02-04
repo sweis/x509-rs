@@ -272,17 +272,28 @@ enum CheckType {
     Ip,
 }
 
+/// Maximum file size for certificate inputs (10 MiB).
+const MAX_INPUT_BYTES: u64 = 10 * 1024 * 1024;
+
 fn read_input(file: Option<&PathBuf>) -> Result<Vec<u8>> {
     match file {
         Some(path) => {
+            let meta = std::fs::metadata(path)
+                .with_context(|| format!("Failed to stat file: {}", path.display()))?;
+            if meta.len() > MAX_INPUT_BYTES {
+                anyhow::bail!(
+                    "File too large ({} bytes, max {} bytes): {}",
+                    meta.len(),
+                    MAX_INPUT_BYTES,
+                    path.display()
+                );
+            }
             std::fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))
         }
         None => {
-            // Limit stdin reads to 10 MiB to prevent unbounded memory growth
-            const MAX_STDIN_BYTES: u64 = 10 * 1024 * 1024;
             let mut buf = Vec::new();
             std::io::stdin()
-                .take(MAX_STDIN_BYTES)
+                .take(MAX_INPUT_BYTES)
                 .read_to_end(&mut buf)
                 .context("Failed to read from stdin")?;
             Ok(buf)

@@ -519,14 +519,7 @@ pub(crate) fn format_ip_bytes(bytes: &[u8]) -> String {
     if let Ok(octets) = <[u8; 4]>::try_from(bytes) {
         std::net::Ipv4Addr::from(octets).to_string()
     } else if let Ok(octets) = <[u8; 16]>::try_from(bytes) {
-        // Use OpenSSL-compatible format: uppercase hex segments without ::
-        // compression (e.g., "2606:2800:0220:0001:0248:1893:25C8:1946")
-        let addr = std::net::Ipv6Addr::from(octets);
-        let segs = addr.segments();
-        segs.iter()
-            .map(|s| format!("{:X}", s))
-            .collect::<Vec<_>>()
-            .join(":")
+        util::format_ipv6_expanded(&std::net::Ipv6Addr::from(octets))
     } else {
         hex::encode(bytes)
     }
