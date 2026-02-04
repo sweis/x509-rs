@@ -252,10 +252,11 @@ impl CertificateInfo {
 
     /// Extract all email addresses from the subject and SAN extension.
     pub fn emails(&self) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
         let mut emails = Vec::new();
         // Check subject emailAddress attribute
         for (key, val) in &self.subject.components {
-            if key == "emailAddress" || key == "Email" {
+            if (key == "emailAddress" || key == "Email") && seen.insert(val.clone()) {
                 emails.push(val.clone());
             }
         }
@@ -264,7 +265,7 @@ impl CertificateInfo {
             if let ExtensionValue::SubjectAltName(entries) = &ext.value {
                 for entry in entries {
                     if let SanEntry::Email(e) = entry {
-                        if !emails.contains(e) {
+                        if seen.insert(e.clone()) {
                             emails.push(e.clone());
                         }
                     }
@@ -276,45 +277,45 @@ impl CertificateInfo {
 
     /// Extract all SAN entries.
     pub fn san_entries(&self) -> Vec<&SanEntry> {
-        for ext in &self.extensions {
-            if let ExtensionValue::SubjectAltName(entries) = &ext.value {
-                return entries.iter().collect();
-            }
-        }
-        Vec::new()
+        self.extensions
+            .iter()
+            .find_map(|ext| match &ext.value {
+                ExtensionValue::SubjectAltName(entries) => Some(entries.iter().collect()),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /// Extract OCSP responder URLs from the AIA extension.
     pub fn ocsp_urls(&self) -> Vec<String> {
-        for ext in &self.extensions {
-            if let ExtensionValue::AuthorityInfoAccess(entries) = &ext.value {
-                return entries
-                    .iter()
-                    .filter(|e| e.method == "OCSP")
-                    .map(|e| e.location.clone())
-                    .collect();
-            }
-        }
-        Vec::new()
+        self.extensions
+            .iter()
+            .find_map(|ext| match &ext.value {
+                ExtensionValue::AuthorityInfoAccess(entries) => Some(
+                    entries
+                        .iter()
+                        .filter(|e| e.method == "OCSP")
+                        .map(|e| e.location.clone())
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /// Extract Key Usage values, if the extension is present.
     pub fn key_usage(&self) -> Option<Vec<String>> {
-        for ext in &self.extensions {
-            if let ExtensionValue::KeyUsage(usages) = &ext.value {
-                return Some(usages.clone());
-            }
-        }
-        None
+        self.extensions.iter().find_map(|ext| match &ext.value {
+            ExtensionValue::KeyUsage(usages) => Some(usages.clone()),
+            _ => None,
+        })
     }
 
     /// Extract Extended Key Usage values, if the extension is present.
     pub fn ext_key_usage(&self) -> Option<Vec<String>> {
-        for ext in &self.extensions {
-            if let ExtensionValue::ExtendedKeyUsage(usages) = &ext.value {
-                return Some(usages.clone());
-            }
-        }
-        None
+        self.extensions.iter().find_map(|ext| match &ext.value {
+            ExtensionValue::ExtendedKeyUsage(usages) => Some(usages.clone()),
+            _ => None,
+        })
     }
 }

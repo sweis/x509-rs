@@ -475,14 +475,12 @@ fn main() -> Result<()> {
             } else if *der {
                 false
             } else {
-                // auto-detect
-                let trimmed: Vec<u8> = input
+                // auto-detect (compare via iterator without heap allocation)
+                input
                     .iter()
                     .skip_while(|b| b.is_ascii_whitespace())
-                    .take(11)
-                    .copied()
-                    .collect();
-                trimmed.starts_with(b"-----BEGIN")
+                    .take(10)
+                    .eq(b"-----BEGIN".iter())
             };
 
             let output_bytes: Vec<u8> = match format.as_str() {
@@ -542,6 +540,13 @@ fn main() -> Result<()> {
                 trust_store.add_pem_directory(ca_dir)?;
             }
 
+            // Validate: --crl-check or --crl-check-all requires --CRLfile
+            if (*crl_check || *crl_check_all) && crl_file.is_none() {
+                anyhow::bail!(
+                    "--crl-check and --crl-check-all require --CRLfile to specify a CRL file"
+                );
+            }
+
             // Load CRL file if provided
             let crl_ders = if let Some(crl_path) = crl_file {
                 let crl_data = std::fs::read(crl_path)
@@ -598,26 +603,23 @@ fn main() -> Result<()> {
 
             if *json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
-            } else if result.is_valid {
-                let label = file
-                    .as_ref()
-                    .map_or("stdin".to_string(), |f| f.display().to_string());
-                println!("{}: {}", label, result);
-                if *show_chain {
-                    for info in &result.chain {
-                        println!(
-                            "depth {}: subject = {}, issuer = {}",
-                            info.depth, info.subject, info.issuer
-                        );
-                    }
-                }
-            } else if let Some(f) = file {
-                eprintln!("{}: {}", f.display(), result);
             } else {
                 let label = file
                     .as_ref()
                     .map_or("stdin".to_string(), |f| f.display().to_string());
-                eprintln!("{}: {}", label, result);
+                if result.is_valid {
+                    println!("{}: {}", label, result);
+                    if *show_chain {
+                        for info in &result.chain {
+                            println!(
+                                "depth {}: subject = {}, issuer = {}",
+                                info.depth, info.subject, info.issuer
+                            );
+                        }
+                    }
+                } else {
+                    eprintln!("{}: {}", label, result);
+                }
             }
 
             if !result.is_valid {

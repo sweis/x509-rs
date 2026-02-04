@@ -739,16 +739,25 @@ pub fn verify_chain_with_options(
             0..1
         };
 
+        // Pre-parse trusted root for CRL signature verification when
+        // the root is not in the provided chain but was found in the trust store
+        let trusted_root_parsed = trusted_root_der
+            .as_deref()
+            .and_then(|der| X509Certificate::from_der(der).ok().map(|(_, c)| c));
+
         for i in check_range {
             let (_, cert) = &parsed[i];
             // Find the issuer for CRL signature verification
             let issuer = if i + 1 < parsed.len() {
                 Some(&parsed[i + 1].1)
+            } else if let Some(ref root) = trusted_root_parsed {
+                Some(root)
             } else {
-                None
+                // Self-signed root: use itself as CRL issuer
+                Some(cert)
             };
 
-            if let Some(reason) = check_crl_revocation(cert, &options.crl_ders, issuer) {
+            if let Some(reason) = check_crl_revocation(cert, &options.crl_ders, issuer, now_ts) {
                 let subject = crate::parser::build_dn(cert.subject()).to_oneline();
                 errors.push(format!(
                     "certificate at depth {} ({}) has been revoked (reason: {})",
@@ -1270,17 +1279,45 @@ pub fn parse_pem_crl(input: &[u8]) -> Result<Vec<Vec<u8>>, XcertError> {
     Ok(crls)
 }
 
+/// Format a CRL revocation reason code as an RFC 5280-style string.
+fn format_crl_reason(rc: &x509_parser::x509::ReasonCode) -> String {
+    let debug = format!("{:?}", rc);
+    if debug.contains("KeyCompromise") {
+        "keyCompromise".into()
+    } else if debug.contains("CACompromise") || debug.contains("CaCompromise") {
+        "cACompromise".into()
+    } else if debug.contains("AffiliationChanged") {
+        "affiliationChanged".into()
+    } else if debug.contains("Superseded") {
+        "superseded".into()
+    } else if debug.contains("CessationOfOperation") {
+        "cessationOfOperation".into()
+    } else if debug.contains("CertificateHold") {
+        "certificateHold".into()
+    } else if debug.contains("RemoveFromCRL") || debug.contains("RemoveFromCrl") {
+        "removeFromCRL".into()
+    } else if debug.contains("PrivilegeWithdrawn") {
+        "privilegeWithdrawn".into()
+    } else if debug.contains("AACompromise") || debug.contains("AaCompromise") {
+        "aACompromise".into()
+    } else {
+        "unspecified".into()
+    }
+}
+
 /// Check whether a certificate has been revoked according to the given CRLs.
 ///
-/// `cert_der` is the DER-encoded certificate to check.
+/// `cert` is the parsed certificate to check.
 /// `crl_ders` is a slice of DER-encoded CRL data.
 /// `issuer_cert` is the issuer's certificate (used to verify the CRL signature).
+/// `now_ts` is the current Unix timestamp for CRL validity checking.
 ///
 /// Returns `Some(reason)` if revoked, `None` if not revoked.
 pub fn check_crl_revocation(
     cert: &X509Certificate,
     crl_ders: &[Vec<u8>],
     issuer_cert: Option<&X509Certificate>,
+    now_ts: i64,
 ) -> Option<String> {
     let serial = cert.raw_serial();
 
@@ -1296,7 +1333,18 @@ pub fn check_crl_revocation(
             continue;
         }
 
-        // Optionally verify CRL signature against the issuer's public key
+        // RFC 5280 Section 6.3.3: Check CRL validity dates
+        let this_update = crl.last_update().timestamp();
+        if now_ts < this_update {
+            continue; // CRL is not yet valid
+        }
+        if let Some(next_update) = crl.next_update() {
+            if now_ts > next_update.timestamp() {
+                continue; // CRL has expired
+            }
+        }
+
+        // Verify CRL signature against the issuer's public key
         if let Some(issuer) = issuer_cert {
             if crl.verify_signature(issuer.public_key()).is_err() {
                 continue;
@@ -1308,7 +1356,7 @@ pub fn check_crl_revocation(
             if revoked.raw_serial() == serial {
                 let reason = revoked
                     .reason_code()
-                    .map(|rc| format!("{:?}", rc.1))
+                    .map(|rc| format_crl_reason(&rc.1))
                     .unwrap_or_else(|| "unspecified".to_string());
                 return Some(reason);
             }

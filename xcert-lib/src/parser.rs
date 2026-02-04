@@ -17,14 +17,13 @@ pub fn parse_cert(input: &[u8]) -> Result<CertificateInfo, XcertError> {
         return Err(XcertError::ParseError("empty input".into()));
     }
 
-    let trimmed = input
+    let is_pem = input
         .iter()
         .skip_while(|b| b.is_ascii_whitespace())
-        .take(11)
-        .copied()
-        .collect::<Vec<_>>();
+        .take(10)
+        .eq(b"-----BEGIN".iter());
 
-    if trimmed.starts_with(b"-----BEGIN") {
+    if is_pem {
         parse_pem(input)
     } else {
         parse_der(input)
@@ -65,7 +64,14 @@ fn build_certificate_info(
 ) -> Result<CertificateInfo, XcertError> {
     let tbs = &x509.tbs_certificate;
 
-    let version = tbs.version.0 + 1;
+    let raw_version = tbs.version.0;
+    if raw_version > 2 {
+        return Err(XcertError::ParseError(format!(
+            "unsupported X.509 version {} (expected v1, v2, or v3)",
+            raw_version + 1
+        )));
+    }
+    let version = raw_version + 1;
 
     let serial = format_serial(tbs.raw_serial());
 
@@ -159,8 +165,11 @@ fn build_public_key_info(spki: &SubjectPublicKeyInfo) -> Result<PublicKeyInfo, X
 
     let (algorithm, key_size, curve, modulus, exponent) = match oid_str.as_str() {
         "1.2.840.113549.1.1.1" => {
-            let (mod_hex, bits, exp) = extract_rsa_params(&spki.subject_public_key.data);
-            ("RSA".into(), Some(bits), None, Some(mod_hex), Some(exp))
+            if let Some((mod_hex, bits, exp)) = extract_rsa_params(&spki.subject_public_key.data) {
+                ("RSA".into(), Some(bits), None, Some(mod_hex), Some(exp))
+            } else {
+                ("RSA".into(), None, None, None, None)
+            }
         }
         "1.2.840.10045.2.1" => {
             let curve_name = extract_ec_curve(&spki.algorithm);
@@ -177,7 +186,7 @@ fn build_public_key_info(spki: &SubjectPublicKeyInfo) -> Result<PublicKeyInfo, X
         _ => (oid_str, None, None, None, None),
     };
 
-    let pem = build_spki_pem(spki);
+    let pem = build_spki_pem(spki)?;
 
     Ok(PublicKeyInfo {
         algorithm,
@@ -190,27 +199,22 @@ fn build_public_key_info(spki: &SubjectPublicKeyInfo) -> Result<PublicKeyInfo, X
 }
 
 /// Extract RSA modulus and exponent from raw public key DER.
-fn extract_rsa_params(data: &[u8]) -> (String, u32, u64) {
-    if let Ok((_, parsed)) = x509_parser::der_parser::parse_der(data) {
-        if let Ok(seq) = parsed.as_sequence() {
-            let mod_result = seq.first().and_then(|m| m.as_bigint().ok());
-            let exp_result = seq.get(1).and_then(|e| e.as_u64().ok());
-
-            if let Some(bigint) = mod_result {
-                let bytes = bigint.to_bytes_be().1;
-                // Skip leading zero byte used for DER positive integer encoding
-                let significant = match bytes.split_first() {
-                    Some((&0, rest)) if !rest.is_empty() => rest,
-                    _ => &bytes,
-                };
-                let bits = (significant.len() as u32) * 8;
-                let exponent = exp_result.unwrap_or(65537);
-                return (hex::encode_upper(significant), bits, exponent);
-            }
-        }
-    }
-    let bits = (data.len() as u32) * 8;
-    (hex::encode_upper(data), bits, 65537)
+///
+/// Returns `None` if the DER structure cannot be parsed, rather than
+/// silently returning incorrect fallback values.
+fn extract_rsa_params(data: &[u8]) -> Option<(String, u32, u64)> {
+    let (_, parsed) = x509_parser::der_parser::parse_der(data).ok()?;
+    let seq = parsed.as_sequence().ok()?;
+    let bigint = seq.first().and_then(|m| m.as_bigint().ok())?;
+    let bytes = bigint.to_bytes_be().1;
+    // Skip leading zero byte used for DER positive integer encoding
+    let significant = match bytes.split_first() {
+        Some((&0, rest)) if !rest.is_empty() => rest,
+        _ => &bytes,
+    };
+    let bits = (significant.len() as u32) * 8;
+    let exponent = seq.get(1).and_then(|e| e.as_u64().ok()).unwrap_or(65537);
+    Some((hex::encode_upper(significant), bits, exponent))
 }
 
 fn extract_ec_curve(algo: &AlgorithmIdentifier) -> String {
@@ -227,7 +231,7 @@ fn extract_ec_curve(algo: &AlgorithmIdentifier) -> String {
     "unknown".into()
 }
 
-fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> String {
+fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> Result<String, XcertError> {
     use x509_parser::der_parser::asn1_rs::ToDer;
 
     // Encode individual components using asn1-rs ToDer for correct TLV encoding.
@@ -250,30 +254,32 @@ fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> String {
     bitstring_content.extend_from_slice(key_data);
 
     // Wrap each in its TLV envelope, then wrap in outer SEQUENCE
-    let algo_seq = der_wrap(0x30, &algo_content);
-    let bitstring = der_wrap(0x03, &bitstring_content);
+    let algo_seq = der_wrap(0x30, &algo_content)?;
+    let bitstring = der_wrap(0x03, &bitstring_content)?;
 
     let mut outer_content = Vec::new();
     outer_content.extend_from_slice(&algo_seq);
     outer_content.extend_from_slice(&bitstring);
-    let spki_der = der_wrap(0x30, &outer_content);
+    let spki_der = der_wrap(0x30, &outer_content)?;
 
-    format!(
+    Ok(format!(
         "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
         util::base64_wrap(&spki_der)
-    )
+    ))
 }
 
 /// Wrap content bytes in a DER tag-length-value envelope.
 ///
-/// Supports content lengths up to 16 MiB (0xFFFFFF). Panics if content
-/// exceeds this limit, which cannot occur for certificate SPKI data.
-fn der_wrap(tag: u8, content: &[u8]) -> Vec<u8> {
+/// Supports content lengths up to 16 MiB (0xFFFFFF). Returns an error
+/// if content exceeds this limit.
+fn der_wrap(tag: u8, content: &[u8]) -> Result<Vec<u8>, XcertError> {
     let len = content.len();
-    assert!(
-        len <= 0xFF_FFFF,
-        "DER content length {len} exceeds maximum supported (16 MiB)"
-    );
+    if len > 0xFF_FFFF {
+        return Err(XcertError::ParseError(format!(
+            "DER content length {} exceeds maximum supported (16 MiB)",
+            len
+        )));
+    }
     let mut buf = Vec::with_capacity(1 + 4 + len);
     buf.push(tag);
     if len < 0x80 {
@@ -292,7 +298,7 @@ fn der_wrap(tag: u8, content: &[u8]) -> Vec<u8> {
         buf.push(len as u8);
     }
     buf.extend_from_slice(content);
-    buf
+    Ok(buf)
 }
 
 fn build_extensions(extensions: &[X509Extension]) -> Result<Vec<Extension>, XcertError> {
@@ -494,12 +500,13 @@ fn general_name_to_san_entry(gn: &GeneralName) -> SanEntry {
 }
 
 fn format_general_name(gn: &GeneralName) -> String {
-    match gn {
-        GeneralName::URI(uri) => uri.to_string(),
-        GeneralName::DNSName(name) => name.to_string(),
-        GeneralName::RFC822Name(email) => email.to_string(),
-        GeneralName::IPAddress(ip) => format_ip_bytes(ip),
-        other => format!("{:?}", other),
+    match general_name_to_san_entry(gn) {
+        SanEntry::Dns(v)
+        | SanEntry::Email(v)
+        | SanEntry::Ip(v)
+        | SanEntry::Uri(v)
+        | SanEntry::DirName(v)
+        | SanEntry::Other(v) => v,
     }
 }
 
