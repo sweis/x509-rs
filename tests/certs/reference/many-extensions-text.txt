@@ -1,0 +1,74 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 24576 (0x6000)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: C = US, ST = California, L = San Francisco, O = Test PKI, OU = Certificate Authority, CN = Test Root CA
+        Validity
+            Not Before: Feb  3 23:57:07 2026 GMT
+            Not After : Feb  3 23:57:07 2101 GMT
+        Subject: C = GB, ST = London, L = City of London, O = Extension Test Ltd, OU = Engineering, CN = extensions.example.com, emailAddress = certs@example.com
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                Modulus:
+                    00:f6:49:0c:2b:20:72:08:1d:b8:27:24:c8:bf:ae:
+                    72:2c:cf:33:23:43:06:d9:13:0a:0d:73:8f:7a:05:
+                    19:8c:6d:74:48:f6:d7:b7:da:4b:7f:5d:f5:48:19:
+                    86:33:4e:0b:e4:b7:ea:05:89:38:2b:c6:58:9d:3b:
+                    f7:ec:35:ed:83:a7:35:7f:f1:27:89:eb:15:6f:69:
+                    cf:21:a2:b9:60:6f:4c:75:6c:d2:6e:be:03:b2:91:
+                    07:bc:ed:f6:ac:db:ef:c7:66:f2:44:07:60:38:1d:
+                    9d:fe:ed:2c:e8:a7:28:2f:32:d0:4e:a6:00:80:f5:
+                    30:9a:65:5b:e5:f5:37:ed:39:73:7e:be:4a:eb:1a:
+                    cf:b9:77:7c:05:89:f2:12:c5:0f:8b:b4:76:c7:ad:
+                    de:99:a3:1f:ae:de:50:94:6e:40:72:2f:c9:6c:06:
+                    c7:2c:11:ef:62:ce:7f:ee:71:5a:49:e3:c2:39:d9:
+                    cb:36:15:72:7d:7d:bf:3d:13:f8:7a:8f:e2:40:5c:
+                    62:4a:76:35:27:17:b9:8b:b9:ff:22:d9:eb:3d:82:
+                    fc:fc:29:9d:d6:7f:86:93:1c:33:51:ae:c2:f4:54:
+                    53:fa:53:5b:ac:e4:ef:08:53:04:80:a8:e9:97:f0:
+                    cc:6b:99:1f:56:4f:0f:12:59:de:53:de:fa:5a:ea:
+                    7f:87
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:FALSE
+            X509v3 Key Usage: critical
+                Digital Signature, Key Encipherment, Data Encipherment
+            X509v3 Extended Key Usage: 
+                TLS Web Server Authentication, TLS Web Client Authentication, Code Signing, E-mail Protection, Time Stamping
+            X509v3 Subject Key Identifier: 
+                DD:C9:CB:F1:EE:81:D9:04:CC:2E:9B:24:13:CC:83:08:B2:EC:D9:33
+            X509v3 Authority Key Identifier: 
+                69:C8:60:9B:B3:6A:7D:FD:26:7E:F9:A9:96:D7:CB:5B:A6:87:27:15
+            X509v3 Subject Alternative Name: 
+                DNS:extensions.example.com, DNS:*.extensions.example.com, DNS:alt.example.com, IP Address:10.0.0.1, IP Address:192.168.1.1, IP Address:0:0:0:0:0:0:0:1, email:certs@example.com, URI:https://example.com/cert-info
+            Authority Information Access: 
+                OCSP - URI:http://ocsp.example.com
+                CA Issuers - URI:http://ca.example.com/root.crt
+            X509v3 CRL Distribution Points: 
+                Full Name:
+                  URI:http://crl.example.com/root.crl
+            X509v3 Certificate Policies: 
+                Policy: 2.23.140.1.2.1
+                Policy: 1.3.6.1.4.1.44947.1.1.1
+            Netscape Comment: 
+                This is a test certificate with many extensions
+    Signature Algorithm: sha256WithRSAEncryption
+    Signature Value:
+        9d:56:b3:a0:b1:94:10:ed:61:99:67:31:13:ce:3a:9e:05:4b:
+        39:0e:c2:5e:c7:69:33:52:25:fd:0a:50:21:51:cb:50:1b:f9:
+        e1:11:b3:cf:4f:9b:a5:33:6b:47:13:5b:74:ed:a2:dc:38:1d:
+        1b:9e:6c:f9:7d:34:c4:fb:c3:72:db:34:c2:34:5c:b6:6c:cd:
+        d3:34:bb:8a:ba:49:82:a6:c3:1d:4a:8d:0b:30:ef:d1:8a:5e:
+        95:ad:d9:36:20:68:50:ed:be:0a:df:30:c7:ba:e2:74:b7:ab:
+        2d:0a:72:c9:c9:c4:69:e9:e8:5b:90:10:49:87:53:6b:8a:e4:
+        c5:9c:a1:f8:17:49:b4:0a:59:1c:f5:3a:33:54:04:9c:fd:49:
+        e3:62:3f:7d:b3:cd:8c:d3:5d:47:74:8f:73:3d:73:44:4e:76:
+        b4:3d:78:32:6c:4a:8f:4d:25:f6:1f:24:87:d9:bb:f4:18:1e:
+        d0:13:13:9f:77:fa:03:6c:56:39:b9:39:82:2e:b0:94:f7:ad:
+        08:28:12:32:2a:3e:82:bf:d6:6c:03:48:40:25:ed:51:14:7e:
+        71:d6:97:cf:89:6c:f6:58:1a:d4:e0:9d:b1:b3:ca:03:19:2d:
+        6a:2f:d7:e3:94:dc:c3:c6:f7:24:7f:50:51:c3:b0:44:dc:3d:
+        2f:43:4e:1d

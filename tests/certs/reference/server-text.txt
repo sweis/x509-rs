@@ -1,0 +1,69 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 4096 (0x1000)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: C = US, ST = California, O = Test PKI, OU = Intermediate Authority, CN = Test Intermediate CA
+        Validity
+            Not Before: Feb  3 23:57:06 2026 GMT
+            Not After : Feb  3 23:57:06 2101 GMT
+        Subject: C = US, ST = California, L = San Francisco, O = Example Corp, CN = www.example.com
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                Modulus:
+                    00:ae:57:3b:c9:63:36:55:eb:52:62:0b:2e:fd:d3:
+                    b4:07:ee:a2:70:d9:07:0e:b6:1f:1d:3c:d6:be:d8:
+                    cb:3b:1f:1d:57:95:7a:5e:8b:cc:b9:ea:21:57:ea:
+                    dc:75:82:fb:c6:05:bd:90:ab:af:7f:6f:29:c6:60:
+                    a0:ab:e2:55:7b:44:d2:fb:43:3b:bc:d3:bf:8f:ab:
+                    bf:7c:5d:d2:11:a9:95:43:36:33:1b:03:b7:f5:e4:
+                    09:b2:af:0c:b4:8e:ef:54:d8:53:91:d6:a1:4f:fe:
+                    5c:79:f1:90:f0:ea:80:bb:cd:5e:04:c5:84:4c:02:
+                    48:d5:2f:1a:1a:8a:46:e7:dc:f0:ed:03:09:2d:57:
+                    a3:c9:c4:77:24:09:a3:8f:23:e1:20:ff:18:a6:db:
+                    0f:78:70:a3:2e:b7:a9:a2:83:a9:94:32:ff:05:38:
+                    f2:9c:e8:67:f8:e4:7c:4b:7a:7f:e3:3f:77:4b:8d:
+                    56:48:88:ac:23:c9:d2:29:f5:a2:41:6d:5b:80:1f:
+                    5b:c9:f6:ab:15:6c:96:e9:ac:cc:a4:0b:39:5f:8e:
+                    7e:88:23:59:26:42:d9:f7:5a:2c:52:24:b8:e2:c4:
+                    8b:e2:ec:e8:6a:8c:9d:34:38:b7:18:72:56:bb:0b:
+                    41:04:a7:8f:14:85:ac:57:22:16:1b:de:fe:d1:86:
+                    52:ed
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:FALSE
+            X509v3 Key Usage: critical
+                Digital Signature, Key Encipherment
+            X509v3 Extended Key Usage: 
+                TLS Web Server Authentication
+            X509v3 Subject Key Identifier: 
+                BB:79:7A:4F:32:24:31:1E:38:99:B4:13:26:4A:5C:BC:2F:9A:10:7F
+            X509v3 Authority Key Identifier: 
+                6B:DF:08:5B:24:D4:B9:90:76:B1:FB:2B:03:8A:0C:06:27:36:48:EA
+            X509v3 Subject Alternative Name: 
+                DNS:www.example.com, DNS:example.com, DNS:*.example.com, IP Address:93.184.216.34, IP Address:2606:2800:220:1:248:1893:25C8:1946, email:admin@example.com
+            Authority Information Access: 
+                OCSP - URI:http://ocsp.example.com
+                CA Issuers - URI:http://ca.example.com/intermediate.crt
+            X509v3 CRL Distribution Points: 
+                Full Name:
+                  URI:http://crl.example.com/intermediate.crl
+    Signature Algorithm: sha256WithRSAEncryption
+    Signature Value:
+        52:6f:37:04:7b:33:cf:10:af:0b:ae:98:0e:79:1d:6d:9f:68:
+        c4:39:bc:3a:95:d3:89:5c:bf:48:53:b7:12:7b:e4:23:c8:dd:
+        e1:ac:c5:7a:d4:32:ef:df:38:e6:65:03:87:58:d8:a8:c1:f8:
+        58:56:67:de:fa:7b:94:85:86:82:4c:e8:f8:4c:96:dd:6c:b5:
+        d3:ff:66:7b:1d:be:3f:45:d2:cd:e7:bb:b7:92:84:8b:62:c5:
+        ce:b4:aa:d4:88:59:f8:f6:43:dc:51:e7:19:c3:ed:0b:90:d5:
+        71:72:75:da:3a:b8:6e:b2:ef:94:23:ec:2b:4d:2d:66:fd:1f:
+        53:0e:d3:2c:81:c1:1c:6d:17:48:a4:ca:62:3b:b3:42:6b:ec:
+        5b:96:df:16:c9:da:4a:e4:48:19:a9:af:35:ae:d7:4e:a6:7b:
+        7a:36:83:7e:f8:c4:63:77:5b:23:05:fd:6f:e4:98:38:5c:c4:
+        f1:9d:19:f3:ce:8d:55:79:f1:8b:4f:35:f2:90:e6:20:5a:cb:
+        56:f0:ac:0f:f5:e6:dc:3e:33:bb:e0:5a:5e:a8:61:26:e2:f7:
+        6a:c1:2e:4e:9e:09:7a:b6:5f:1c:a2:6c:ad:d7:b7:09:73:bd:
+        d0:db:95:cf:1c:11:5a:14:02:d6:70:c6:63:cc:9c:94:7e:8a:
+        d8:62:8c:01

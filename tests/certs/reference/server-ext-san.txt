@@ -1,0 +1,2 @@
+X509v3 Subject Alternative Name: 
+    DNS:www.example.com, DNS:example.com, DNS:*.example.com, IP Address:93.184.216.34, IP Address:2606:2800:220:1:248:1893:25C8:1946, email:admin@example.com

@@ -1,0 +1,63 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 4097 (0x1001)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: C = US, ST = California, O = Test PKI, OU = Intermediate Authority, CN = Test Intermediate CA
+        Validity
+            Not Before: Feb  3 23:57:06 2026 GMT
+            Not After : Feb  3 23:57:06 2101 GMT
+        Subject: C = US, ST = New York, O = Client Organization, CN = client@example.com
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                Modulus:
+                    00:be:79:09:39:1c:74:e3:41:65:29:cd:23:b8:8d:
+                    af:90:96:8e:19:93:70:5f:9d:29:e9:da:0a:46:a9:
+                    5a:51:26:43:9f:7a:ef:67:8b:f1:75:b7:db:8a:4a:
+                    06:ed:18:3f:dc:a3:2d:44:dc:e2:57:ed:ac:d1:b7:
+                    73:74:ee:2c:01:40:4a:5d:43:3e:76:b8:a4:f9:cd:
+                    26:af:61:d3:ae:13:7a:8f:91:56:ce:eb:40:ec:5d:
+                    39:42:fc:4d:cc:a8:4f:2f:c8:6f:24:9b:ac:13:c3:
+                    4a:8d:d5:05:2e:2a:b1:af:6b:d4:06:a4:aa:d1:e7:
+                    75:e6:15:a8:ed:c9:10:9f:94:4f:a8:b4:43:67:00:
+                    f6:0a:49:55:c8:96:d8:e0:28:06:18:ee:1e:98:8a:
+                    c1:ee:62:d3:7d:06:3c:13:fd:61:60:b3:4d:22:a1:
+                    80:20:cc:18:08:f8:64:27:4a:12:cd:32:a6:bc:97:
+                    a4:4a:18:e3:d2:70:59:64:99:9b:4c:f5:90:d9:cc:
+                    04:f5:37:62:43:8b:c6:b5:eb:89:9a:7d:ea:2a:82:
+                    a5:18:f8:69:45:2f:f0:a8:3c:69:aa:36:bc:82:cf:
+                    c6:d8:df:cb:05:da:f1:83:bd:40:9d:20:03:66:1c:
+                    72:71:2f:72:42:73:2c:60:bc:83:bd:11:b6:c4:f4:
+                    a0:69
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:FALSE
+            X509v3 Key Usage: critical
+                Digital Signature
+            X509v3 Extended Key Usage: 
+                TLS Web Client Authentication, E-mail Protection
+            X509v3 Subject Key Identifier: 
+                13:0D:4D:29:39:62:11:F5:71:F8:D3:B9:CA:1F:7F:82:48:5B:2F:23
+            X509v3 Authority Key Identifier: 
+                6B:DF:08:5B:24:D4:B9:90:76:B1:FB:2B:03:8A:0C:06:27:36:48:EA
+            X509v3 Subject Alternative Name: 
+                email:client@example.com
+    Signature Algorithm: sha256WithRSAEncryption
+    Signature Value:
+        5c:09:43:2a:37:9c:b5:69:47:31:4f:99:92:51:4c:37:ef:e5:
+        0a:e8:5b:29:a8:e7:cd:39:16:44:71:45:31:df:2a:35:a7:b7:
+        95:92:aa:bd:d3:25:f3:f0:65:c6:43:ae:43:94:f8:0e:4c:15:
+        40:31:9a:e9:3a:7b:ed:e4:59:af:68:d7:56:ef:03:df:49:b6:
+        43:83:0d:ae:8d:24:4a:3e:cd:36:17:fb:ce:e6:ab:0c:cc:7c:
+        26:ef:4f:ee:17:ad:46:ae:07:2c:4d:4b:e3:6d:90:e2:40:78:
+        f3:84:27:c3:a9:77:b3:78:79:64:ea:a6:75:0c:44:82:92:0e:
+        17:08:ef:69:be:e2:ca:66:90:93:7d:2d:9e:0d:ae:67:97:8a:
+        57:22:ae:c5:06:df:18:f4:ea:b8:87:a6:61:6b:32:b8:7f:2e:
+        eb:dc:de:87:ba:5e:e0:34:51:66:da:df:ae:6e:94:5b:8e:1a:
+        54:74:58:15:58:c3:29:b1:29:30:b2:a6:3d:ec:4d:5a:8f:f8:
+        60:c6:09:00:69:e1:d3:eb:e1:74:81:38:b1:22:48:86:d7:ca:
+        ca:b8:70:fb:56:42:54:ba:0e:60:59:bd:5a:85:2a:d4:ed:70:
+        bc:b5:a3:c7:7c:ac:25:ad:9e:f4:3f:50:ee:33:e6:6a:3d:b8:
+        81:9b:f1:42

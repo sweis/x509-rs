@@ -1,0 +1,1 @@
+subject=C = US, ST = California, O = Test PKI, OU = Intermediate Authority, CN = Test Intermediate CA

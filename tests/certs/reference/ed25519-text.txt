@@ -1,0 +1,32 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 12288 (0x3000)
+        Signature Algorithm: ED25519
+        Issuer: C = CH, O = EdDSA Test, CN = ed25519.example.com
+        Validity
+            Not Before: Feb  3 23:57:06 2026 GMT
+            Not After : Feb  3 23:57:06 2101 GMT
+        Subject: C = CH, O = EdDSA Test, CN = ed25519.example.com
+        Subject Public Key Info:
+            Public Key Algorithm: ED25519
+                ED25519 Public-Key:
+                pub:
+                    fd:d8:e7:06:0c:da:9f:91:ab:bf:c0:cf:cc:7a:de:
+                    83:05:24:4b:37:93:c1:ca:8c:a7:c1:17:7d:61:2f:
+                    0e:03
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:FALSE
+            X509v3 Key Usage: critical
+                Digital Signature
+            X509v3 Subject Key Identifier: 
+                95:F4:04:AE:89:A6:F0:B8:63:31:D3:E4:C4:CF:EC:C3:07:CC:9F:97
+            X509v3 Subject Alternative Name: 
+                DNS:ed25519.example.com
+    Signature Algorithm: ED25519
+    Signature Value:
+        19:c7:ac:35:96:2a:91:10:4e:a8:27:7d:c0:d9:e8:39:6f:aa:
+        1c:66:77:45:ca:62:69:a4:ab:d7:16:43:90:b9:9d:48:48:14:
+        d8:26:0a:00:ea:cc:84:37:14:fd:80:f5:65:de:11:ca:19:72:
+        c0:d6:ed:78:c0:27:1f:42:a2:0c

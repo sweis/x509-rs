@@ -1,0 +1,57 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 20480 (0x5000)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: CN = Expired Test, O = Expired Org
+        Validity
+            Not Before: Feb  3 23:57:06 2026 GMT
+            Not After : Feb  4 23:57:06 2026 GMT
+        Subject: CN = Expired Test, O = Expired Org
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                Modulus:
+                    00:b4:26:e5:c1:43:17:80:6f:5f:eb:9a:ab:57:f3:
+                    39:1c:fc:4a:a4:c7:06:b0:f8:ad:02:49:d2:59:2f:
+                    ca:15:39:0c:20:8a:4b:17:31:52:ec:85:6e:c5:c2:
+                    f4:b2:26:e8:d2:ab:2e:07:be:f4:69:a6:c8:cc:13:
+                    d9:69:47:2f:58:65:37:df:aa:67:ff:04:4b:fc:f2:
+                    47:b8:4d:3c:7d:5f:de:ab:b9:2c:21:2c:7d:a0:4b:
+                    42:ee:c6:f2:7e:d1:3c:bb:5a:bb:0e:33:37:da:59:
+                    af:d9:e3:35:fb:80:48:8f:b4:90:d2:43:02:a9:9e:
+                    85:e1:ee:f8:38:8b:93:b8:bc:73:f3:d1:12:10:fe:
+                    6c:93:a7:6a:20:e7:8c:29:3b:8a:30:f4:e3:4f:c4:
+                    10:2f:70:c5:4e:4a:c4:90:48:e0:8b:28:25:3e:4f:
+                    b9:50:17:e6:49:e1:66:f7:c2:2c:20:11:07:a5:42:
+                    a4:42:eb:06:e2:da:a5:43:95:c3:8e:19:89:7d:20:
+                    ca:63:35:ec:7e:5c:8c:1b:8a:ff:10:6e:01:c0:ba:
+                    6b:65:f0:6a:24:34:92:0b:fe:c3:dc:03:54:79:31:
+                    bc:ed:79:91:58:d0:fc:e4:74:9f:aa:69:27:c6:d8:
+                    0b:50:7f:fa:95:67:56:91:8d:df:d5:4e:ef:d4:1f:
+                    96:4f
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Subject Key Identifier: 
+                69:12:F9:C6:8B:71:CB:22:D5:C1:04:73:32:27:65:C4:55:C5:25:3D
+            X509v3 Authority Key Identifier: 
+                69:12:F9:C6:8B:71:CB:22:D5:C1:04:73:32:27:65:C4:55:C5:25:3D
+            X509v3 Basic Constraints: critical
+                CA:TRUE
+    Signature Algorithm: sha256WithRSAEncryption
+    Signature Value:
+        96:f5:bc:07:bd:a0:51:8e:1f:81:fd:e3:64:8d:4d:37:9b:38:
+        03:b7:5f:69:cf:17:72:54:bd:ce:e4:af:3c:07:cb:21:96:c5:
+        36:2c:21:a7:3c:5d:5c:a1:70:b0:40:57:60:7a:05:6d:b4:f5:
+        14:43:4f:1b:d4:c3:25:73:09:8e:62:f3:52:5e:9e:7f:52:06:
+        14:d3:90:61:79:1a:ba:7a:66:cf:7c:cc:df:63:f2:f5:27:19:
+        d2:3a:db:56:2d:1f:10:41:b9:49:e1:22:13:c2:f2:98:ab:17:
+        20:d2:76:00:46:21:af:2b:1d:19:34:ec:be:fa:66:8c:1b:40:
+        a8:c4:15:9c:e1:8b:d5:a6:a0:6b:59:dc:69:28:60:7e:dc:ee:
+        26:21:ac:fd:8a:52:d8:b7:84:1d:5d:28:c8:c9:5e:c8:b6:9a:
+        60:61:e0:f7:99:45:76:36:23:f7:1e:d7:e1:e8:e9:54:a0:57:
+        9a:04:96:fa:a9:b8:5a:b0:9a:10:dc:97:99:44:d5:d7:08:7f:
+        b1:8d:71:e7:bd:4f:fa:6a:7f:fb:56:eb:34:1e:a6:21:b4:4c:
+        fd:79:71:a6:42:a2:72:40:fe:3c:68:59:dd:a6:b9:58:a3:00:
+        62:40:84:1e:b9:43:76:02:52:87:09:23:3d:63:58:dc:0e:bc:
+        f6:cd:be:68

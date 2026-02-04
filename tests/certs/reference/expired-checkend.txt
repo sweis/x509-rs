@@ -1,0 +1,2 @@
+Certificate will expire
+exit_code: 1

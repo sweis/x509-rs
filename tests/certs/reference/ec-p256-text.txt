@@ -1,0 +1,51 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 8192 (0x2000)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: C = US, ST = California, L = San Francisco, O = Test PKI, OU = Certificate Authority, CN = Test Root CA
+        Validity
+            Not Before: Feb  3 23:57:06 2026 GMT
+            Not After : Feb  3 23:57:06 2101 GMT
+        Subject: C = DE, ST = Bavaria, L = Munich, O = EC Test Corp, CN = ec-test.example.com
+        Subject Public Key Info:
+            Public Key Algorithm: id-ecPublicKey
+                Public-Key: (256 bit)
+                pub:
+                    04:9b:0c:f7:bc:60:0b:6d:84:ba:48:88:1c:91:36:
+                    cf:98:12:ad:b3:e4:03:97:3d:ba:ff:46:f8:c4:16:
+                    2d:b7:8e:88:65:99:cb:fa:af:d1:b5:8e:5e:b9:15:
+                    a2:e1:f5:dc:3e:5a:40:dc:04:ce:27:19:28:3d:06:
+                    42:cf:1a:1f:82
+                ASN1 OID: prime256v1
+                NIST CURVE: P-256
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:FALSE
+            X509v3 Key Usage: critical
+                Digital Signature
+            X509v3 Extended Key Usage: 
+                TLS Web Server Authentication, TLS Web Client Authentication
+            X509v3 Subject Key Identifier: 
+                38:DC:D7:FE:0D:57:FE:6F:73:1F:09:A6:18:13:1E:A4:0B:9E:66:50
+            X509v3 Subject Alternative Name: 
+                DNS:ec-test.example.com
+            X509v3 Authority Key Identifier: 
+                69:C8:60:9B:B3:6A:7D:FD:26:7E:F9:A9:96:D7:CB:5B:A6:87:27:15
+    Signature Algorithm: sha256WithRSAEncryption
+    Signature Value:
+        a1:1d:a7:42:01:2f:7f:67:38:55:26:e1:67:5d:98:5c:d2:33:
+        ee:b9:f7:bf:7b:86:97:f0:19:47:9a:69:4e:ba:ad:84:50:f4:
+        26:81:f6:90:ea:93:c7:d7:ef:9a:ca:e9:30:01:9f:6e:87:87:
+        f7:18:52:43:51:7b:bd:f6:7d:f8:55:54:42:73:58:8e:79:da:
+        e6:ca:2e:e7:96:f3:18:b8:e2:72:0e:59:91:6b:04:53:d1:5e:
+        fd:c7:33:ae:e1:19:84:41:e3:50:e6:47:66:e9:df:7b:8c:0a:
+        ac:b3:37:22:7b:e8:88:38:58:5e:3f:c9:f9:d6:cd:7a:c6:f8:
+        2d:22:92:38:d5:12:30:2a:b2:63:25:95:3e:c3:03:23:ef:26:
+        df:9a:29:ef:be:49:80:77:e9:69:74:8f:00:22:ea:4a:b6:89:
+        35:9a:87:59:f5:00:ec:5a:60:17:28:9a:cf:67:d7:9a:ee:00:
+        ef:0a:78:82:3a:37:47:6a:b0:ee:16:0f:ef:5d:06:c7:64:c9:
+        ad:34:55:94:f5:d0:01:63:bb:2e:4a:69:d3:a8:7c:eb:45:ec:
+        a2:fe:a2:35:59:e6:63:2b:cb:8e:89:7f:c2:cd:8d:bf:21:b1:
+        1e:39:e2:62:15:8a:3c:e5:d0:75:97:97:5f:b7:33:0f:4c:cb:
+        38:eb:16:b6

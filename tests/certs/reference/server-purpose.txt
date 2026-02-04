@@ -1,0 +1,19 @@
+Certificate purposes:
+SSL client : No
+SSL client CA : No
+SSL server : Yes
+SSL server CA : No
+Netscape SSL server : Yes
+Netscape SSL server CA : No
+S/MIME signing : No
+S/MIME signing CA : No
+S/MIME encryption : No
+S/MIME encryption CA : No
+CRL signing : No
+CRL signing CA : No
+Any Purpose : Yes
+Any Purpose CA : Yes
+OCSP helper : Yes
+OCSP helper CA : No
+Time Stamp signing : No
+Time Stamp signing CA : No
