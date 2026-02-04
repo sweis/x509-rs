@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Generate x509 test certificates for the x509-rs test suite.
+# Generate x509 test certificates for the xcert-rs test suite.
 #
 # These certificates are generated with fixed dates (2025-01-01 to 2099-12-31)
 # so they do not expire during normal use. The "expired" certificate uses
