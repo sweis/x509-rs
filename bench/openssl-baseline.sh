@@ -8,7 +8,7 @@
 set -euo pipefail
 
 ITERATIONS=1000
-CERT_DIR="/home/user/x509-rs/tests/certs"
+CERT_DIR="/home/user/xcert-rs/tests/certs"
 OPENSSL_VERSION="$(openssl version)"
 
 # CSV-style accumulator: "description|cert|iterations|total_ns"

@@ -265,8 +265,15 @@ fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> String {
 }
 
 /// Wrap content bytes in a DER tag-length-value envelope.
+///
+/// Supports content lengths up to 16 MiB (0xFFFFFF). Panics if content
+/// exceeds this limit, which cannot occur for certificate SPKI data.
 fn der_wrap(tag: u8, content: &[u8]) -> Vec<u8> {
     let len = content.len();
+    assert!(
+        len <= 0xFF_FFFF,
+        "DER content length {len} exceeds maximum supported (16 MiB)"
+    );
     let mut buf = Vec::with_capacity(1 + 4 + len);
     buf.push(tag);
     if len < 0x80 {
@@ -274,7 +281,7 @@ fn der_wrap(tag: u8, content: &[u8]) -> Vec<u8> {
     } else if len < 0x100 {
         buf.push(0x81);
         buf.push(len as u8);
-    } else if len < 0x10000 {
+    } else if len < 0x1_0000 {
         buf.push(0x82);
         buf.push((len >> 8) as u8);
         buf.push(len as u8);
@@ -289,11 +296,7 @@ fn der_wrap(tag: u8, content: &[u8]) -> Vec<u8> {
 }
 
 fn build_extensions(extensions: &[X509Extension]) -> Result<Vec<Extension>, XcertError> {
-    let mut result = Vec::new();
-    for ext in extensions {
-        result.push(build_extension(ext)?);
-    }
-    Ok(result)
+    extensions.iter().map(build_extension).collect()
 }
 
 fn build_extension(ext: &X509Extension) -> Result<Extension, XcertError> {

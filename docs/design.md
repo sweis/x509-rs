@@ -55,7 +55,7 @@ features of `openssl x509`, with a simplified, modern CLI interface.
 The project is organized as a Cargo workspace with two crates:
 
 ```
-x509-rs/
+xcert-rs/
 ├── Cargo.toml              # Workspace root
 ├── xcert/                   # CLI binary crate
 │   ├── Cargo.toml

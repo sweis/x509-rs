@@ -742,16 +742,23 @@ mod extensions {
 mod fingerprints {
     use super::*;
 
+    /// Parse OpenSSL fingerprint like "sha256 Fingerprint=AA:BB:CC:..."
+    fn expected_fingerprint(ref_file: &str) -> String {
+        let line = load_reference(ref_file);
+        line.split('=')
+            .nth(1)
+            .unwrap_or(&line)
+            .trim()
+            .to_uppercase()
+    }
+
     #[test]
     fn root_ca_sha256_fingerprint() {
         let data = load_cert("root-ca.pem");
         let cert = parse_cert(&data).unwrap();
         let fp = cert.fingerprint(DigestAlgorithm::Sha256);
-        assert_eq!(
-            fp.to_uppercase(),
-            "D8:68:33:A3:D3:AC:AF:2A:80:79:7E:1C:76:16:2F:77:42:BC:CA:F5:DD:1D:50:63:21:6B:5F:09:3F:D1:1D:EB",
-            "SHA-256 fingerprint mismatch"
-        );
+        let expected = expected_fingerprint("root-ca-fingerprint-sha256.txt");
+        assert_eq!(fp.to_uppercase(), expected, "SHA-256 fingerprint mismatch");
     }
 
     #[test]
@@ -759,11 +766,8 @@ mod fingerprints {
         let data = load_cert("root-ca.pem");
         let cert = parse_cert(&data).unwrap();
         let fp = cert.fingerprint(DigestAlgorithm::Sha1);
-        assert_eq!(
-            fp.to_uppercase(),
-            "00:84:0F:FC:6E:4D:1E:7E:BF:6F:B2:9A:7E:24:49:96:14:B0:D7:CC",
-            "SHA-1 fingerprint mismatch"
-        );
+        let expected = expected_fingerprint("root-ca-fingerprint-sha1.txt");
+        assert_eq!(fp.to_uppercase(), expected, "SHA-1 fingerprint mismatch");
     }
 
     #[test]
@@ -771,11 +775,8 @@ mod fingerprints {
         let data = load_cert("server.pem");
         let cert = parse_cert(&data).unwrap();
         let fp = cert.fingerprint(DigestAlgorithm::Sha256);
-        assert_eq!(
-            fp.to_uppercase(),
-            "16:C3:45:C3:D5:6F:16:77:5B:34:D8:13:56:0E:FF:4C:DE:6D:EB:D7:CD:CF:51:CF:D9:60:BA:21:9A:4E:CF:34",
-            "SHA-256 fingerprint mismatch"
-        );
+        let expected = expected_fingerprint("server-fingerprint-sha256.txt");
+        assert_eq!(fp.to_uppercase(), expected, "SHA-256 fingerprint mismatch");
     }
 
     #[test]
@@ -783,11 +784,8 @@ mod fingerprints {
         let data = load_cert("many-extensions.pem");
         let cert = parse_cert(&data).unwrap();
         let fp = cert.fingerprint(DigestAlgorithm::Sha256);
-        assert_eq!(
-            fp.to_uppercase(),
-            "21:13:06:E9:59:A7:7B:5B:1B:4F:3A:4D:DD:FE:35:E2:67:70:D2:A3:52:1F:06:81:B6:52:EE:72:F5:BD:FB:65",
-            "SHA-256 fingerprint mismatch"
-        );
+        let expected = expected_fingerprint("many-extensions-fingerprint-sha256.txt");
+        assert_eq!(fp.to_uppercase(), expected, "SHA-256 fingerprint mismatch");
     }
 
     #[test]
@@ -2755,7 +2753,7 @@ mod reference_vectors {
     fn normalize_serial(openssl_serial: &str) -> String {
         let hex = openssl_serial.trim().to_ascii_uppercase();
         // Pad to even length
-        let hex = if hex.len() % 2 != 0 {
+        let hex = if !hex.len().is_multiple_of(2) {
             format!("0{}", hex)
         } else {
             hex

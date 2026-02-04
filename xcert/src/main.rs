@@ -173,8 +173,11 @@ fn read_input(file: Option<&PathBuf>) -> Result<Vec<u8>> {
             std::fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))
         }
         None => {
+            // Limit stdin reads to 10 MiB to prevent unbounded memory growth
+            const MAX_STDIN_BYTES: u64 = 10 * 1024 * 1024;
             let mut buf = Vec::new();
             std::io::stdin()
+                .take(MAX_STDIN_BYTES)
                 .read_to_end(&mut buf)
                 .context("Failed to read from stdin")?;
             Ok(buf)
@@ -490,6 +493,8 @@ fn main() -> Result<()> {
                         );
                     }
                 }
+            } else if let Some(f) = file {
+                eprintln!("{}: {}", f.display(), result);
             } else {
                 let label = file
                     .as_ref()
