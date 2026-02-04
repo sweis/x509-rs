@@ -166,9 +166,7 @@ impl TrustStore {
         let probe = openssl_probe::probe();
 
         // Build candidate list: env var first, then openssl-probe, then known paths
-        let mut bundle_paths: Vec<Option<String>> = vec![
-            std::env::var("SSL_CERT_FILE").ok(),
-        ];
+        let mut bundle_paths: Vec<Option<String>> = vec![std::env::var("SSL_CERT_FILE").ok()];
         if let Some(probe_file) = probe.cert_file {
             bundle_paths.push(Some(probe_file.to_string_lossy().into_owned()));
         }
@@ -179,40 +177,38 @@ impl TrustStore {
             Some("/etc/ssl/cert.pem".into()),
         ]);
 
-        for path_opt in &bundle_paths {
-            if let Some(path) = path_opt {
-                if let Ok(data) = std::fs::read(path) {
-                    let added = store.add_pem_bundle(&data)?;
-                    if added > 0 {
-                        return Ok(store);
-                    }
+        for path in bundle_paths.iter().flatten() {
+            if let Ok(data) = std::fs::read(path) {
+                let added = store.add_pem_bundle(&data)?;
+                if added > 0 {
+                    return Ok(store);
                 }
             }
         }
 
         // Try directory of individual certs
-        let mut dir_paths: Vec<Option<String>> = vec![
-            std::env::var("SSL_CERT_DIR").ok(),
-        ];
+        let mut dir_paths: Vec<Option<String>> = vec![std::env::var("SSL_CERT_DIR").ok()];
         if let Some(probe_dir) = probe.cert_dir {
             dir_paths.push(Some(probe_dir.to_string_lossy().into_owned()));
         }
         dir_paths.push(Some("/etc/ssl/certs".into()));
 
-        for dir_opt in &dir_paths {
-            if let Some(dir) = dir_opt {
-                if let Ok(entries) = std::fs::read_dir(dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().map(|e| e == "pem" || e == "crt").unwrap_or(false) {
-                            if let Ok(data) = std::fs::read(&path) {
-                                let _ = store.add_pem_bundle(&data);
-                            }
+        for dir in dir_paths.iter().flatten() {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path
+                        .extension()
+                        .map(|e| e == "pem" || e == "crt")
+                        .unwrap_or(false)
+                    {
+                        if let Ok(data) = std::fs::read(&path) {
+                            let _ = store.add_pem_bundle(&data);
                         }
                     }
-                    if !store.is_empty() {
-                        return Ok(store);
-                    }
+                }
+                if !store.is_empty() {
+                    return Ok(store);
                 }
             }
         }
@@ -246,8 +242,8 @@ impl TrustStore {
 
     /// Add a DER-encoded certificate to the trust store.
     pub fn add_der(&mut self, der: &[u8]) -> Result<(), XcertError> {
-        let (_, x509) = X509Certificate::from_der(der)
-            .map_err(|e| XcertError::DerError(format!("{}", e)))?;
+        let (_, x509) =
+            X509Certificate::from_der(der).map_err(|e| XcertError::DerError(format!("{}", e)))?;
 
         let subject_raw = x509.subject().as_raw().to_vec();
         self.certs_by_subject
@@ -279,7 +275,10 @@ impl TrustStore {
     pub fn add_pem_directory(&mut self, dir: &std::path::Path) -> Result<usize, XcertError> {
         let mut total = 0;
         let entries = std::fs::read_dir(dir).map_err(|e| {
-            XcertError::Io(std::io::Error::new(e.kind(), format!("{}: {}", dir.display(), e)))
+            XcertError::Io(std::io::Error::new(
+                e.kind(),
+                format!("{}: {}", dir.display(), e),
+            ))
         })?;
         for entry in entries {
             let entry = entry?;
@@ -355,10 +354,7 @@ pub fn parse_pem_chain(input: &[u8]) -> Result<Vec<Vec<u8>>, XcertError> {
                 if !certs.is_empty() {
                     break;
                 }
-                return Err(XcertError::PemError(format!(
-                    "failed to parse PEM: {}",
-                    e
-                )));
+                return Err(XcertError::PemError(format!("failed to parse PEM: {}", e)));
             }
         }
     }
@@ -434,7 +430,10 @@ pub fn verify_chain_with_options(
             X509Certificate::from_der(der)
                 .map(|(_, x509)| (der.as_slice(), x509))
                 .map_err(|e| {
-                    XcertError::VerifyError(format!("failed to parse certificate at depth {}: {}", i, e))
+                    XcertError::VerifyError(format!(
+                        "failed to parse certificate at depth {}: {}",
+                        i, e
+                    ))
                 })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -473,14 +472,10 @@ pub fn verify_chain_with_options(
     // Check basic constraints for CA certificates (all except leaf at depth 0)
     for (i, (_, x509)) in parsed.iter().enumerate().skip(1) {
         let subject = crate::parser::build_dn(x509.subject()).to_oneline();
-        let bc = x509
-            .basic_constraints()
-            .ok()
-            .flatten()
-            .map(|bc| bc.value);
+        let bc = x509.basic_constraints().ok().flatten().map(|bc| bc.value);
 
         match bc {
-            Some(ref constraints) => {
+            Some(constraints) => {
                 if !constraints.ca {
                     errors.push(format!(
                         "certificate at depth {} ({}) is not a CA but is used as issuer",
@@ -532,16 +527,15 @@ pub fn verify_chain_with_options(
 
     // Verify signatures along the chain
     // Each cert should be signed by the next cert in the chain
-    for i in 0..parsed.len().saturating_sub(1) {
-        let (_, child) = &parsed[i];
-        let (_, parent) = &parsed[i + 1];
+    for (child, parent) in parsed.iter().zip(parsed.iter().skip(1)) {
+        let (_, child_x509) = child;
+        let (_, parent_x509) = parent;
 
-        if let Err(e) = child.verify_signature(Some(parent.public_key())) {
+        if let Err(e) = child_x509.verify_signature(Some(parent_x509.public_key())) {
             errors.push(format!(
-                "signature verification failed at depth {} ({} -> {}): {}",
-                i,
-                crate::parser::build_dn(child.subject()).to_oneline(),
-                crate::parser::build_dn(parent.subject()).to_oneline(),
+                "signature verification failed ({} -> {}): {}",
+                crate::parser::build_dn(child_x509.subject()).to_oneline(),
+                crate::parser::build_dn(parent_x509.subject()).to_oneline(),
                 e
             ));
         }
@@ -562,8 +556,10 @@ pub fn verify_chain_with_options(
     }
 
     if !trust_anchored {
-        let last = &parsed[parsed.len() - 1];
-        let (last_der, last_x509) = last;
+        let Some((last_der, last_x509)) = parsed.last() else {
+            // Unreachable: we checked chain_der.is_empty() at function entry
+            return Err(XcertError::VerifyError("empty certificate chain".into()));
+        };
         let last_subject = crate::parser::build_dn(last_x509.subject()).to_oneline();
 
         // Check if the last cert in the chain is self-signed (i.e., it's a root)
@@ -613,26 +609,28 @@ pub fn verify_chain_with_options(
 
     // Check Extended Key Usage on the leaf certificate (if purpose is specified)
     if let Some(ref required_oid) = options.purpose {
-        let (_, leaf) = &parsed[0];
+        let Some((_, leaf)) = parsed.first() else {
+            return Err(XcertError::VerifyError("empty certificate chain".into()));
+        };
         if let Ok(Some(eku)) = leaf.extended_key_usage() {
             let eku_val = &eku.value;
             // Map well-known OIDs to their boolean flags
-            let has_eku = match required_oid.as_str() {
-                "1.3.6.1.5.5.7.3.1" => eku_val.server_auth,
-                "1.3.6.1.5.5.7.3.2" => eku_val.client_auth,
-                "1.3.6.1.5.5.7.3.3" => eku_val.code_signing,
-                "1.3.6.1.5.5.7.3.4" => eku_val.email_protection,
-                "1.3.6.1.5.5.7.3.8" => eku_val.time_stamping,
-                "1.3.6.1.5.5.7.3.9" => eku_val.ocsp_signing,
-                "2.5.29.37.0" => eku_val.any,
-                _ => {
-                    // Check the 'other' OIDs list
-                    eku_val
+            // RFC 5280 Section 4.2.1.12: anyExtendedKeyUsage satisfies
+            // any specific purpose requirement.
+            let has_eku = eku_val.any
+                || match required_oid.as_str() {
+                    "1.3.6.1.5.5.7.3.1" => eku_val.server_auth,
+                    "1.3.6.1.5.5.7.3.2" => eku_val.client_auth,
+                    "1.3.6.1.5.5.7.3.3" => eku_val.code_signing,
+                    "1.3.6.1.5.5.7.3.4" => eku_val.email_protection,
+                    "1.3.6.1.5.5.7.3.8" => eku_val.time_stamping,
+                    "1.3.6.1.5.5.7.3.9" => eku_val.ocsp_signing,
+                    "2.5.29.37.0" => true,
+                    _ => eku_val
                         .other
                         .iter()
-                        .any(|oid| format!("{}", oid) == *required_oid)
-                }
-            };
+                        .any(|oid| format!("{}", oid) == *required_oid),
+                };
             if !has_eku {
                 let leaf_subject = crate::parser::build_dn(leaf.subject()).to_oneline();
                 errors.push(format!(
@@ -645,7 +643,9 @@ pub fn verify_chain_with_options(
 
     // Check hostname against leaf certificate (if requested)
     if let Some(host) = hostname {
-        let (_, leaf) = &parsed[0];
+        let Some((_, leaf)) = parsed.first() else {
+            return Err(XcertError::VerifyError("empty certificate chain".into()));
+        };
         if !verify_hostname(leaf, host) {
             let san_names = extract_san_dns_names(leaf);
             let cn = extract_cn(leaf);
@@ -665,23 +665,21 @@ pub fn verify_chain_with_options(
 
     // Check email against leaf certificate SAN/subject (if requested)
     if let Some(ref email) = options.verify_email {
-        let (_, leaf) = &parsed[0];
+        let Some((_, leaf)) = parsed.first() else {
+            return Err(XcertError::VerifyError("empty certificate chain".into()));
+        };
         if !verify_email(leaf, email) {
-            errors.push(format!(
-                "email '{}' does not match certificate",
-                email
-            ));
+            errors.push(format!("email '{}' does not match certificate", email));
         }
     }
 
     // Check IP address against leaf certificate SAN (if requested)
     if let Some(ref ip) = options.verify_ip {
-        let (_, leaf) = &parsed[0];
+        let Some((_, leaf)) = parsed.first() else {
+            return Err(XcertError::VerifyError("empty certificate chain".into()));
+        };
         if !verify_ip(leaf, ip) {
-            errors.push(format!(
-                "IP address '{}' does not match certificate",
-                ip
-            ));
+            errors.push(format!("IP address '{}' does not match certificate", ip));
         }
     }
 
@@ -748,13 +746,15 @@ pub fn verify_with_untrusted(
     for _ in 0..MAX_CHAIN_DEPTH {
         let mut found = false;
         for (idx, (der, cert)) in intermediates.iter().enumerate() {
-            if used[idx] {
+            if used.get(idx).copied().unwrap_or(true) {
                 continue;
             }
             if cert.subject().as_raw() == current_issuer_raw.as_slice() {
                 chain.push(der.clone());
                 current_issuer_raw = cert.issuer().as_raw().to_vec();
-                used[idx] = true;
+                if let Some(flag) = used.get_mut(idx) {
+                    *flag = true;
+                }
                 found = true;
                 break;
             }
@@ -892,4 +892,3 @@ fn verify_ip(cert: &X509Certificate, ip: &str) -> bool {
 
     false
 }
-
