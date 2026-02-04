@@ -763,7 +763,6 @@ name = "xcert-lib"
 version = "0.1.0"
 dependencies = [
  "base64",
- "digest",
  "hex",
  "openssl-probe",
  "serde",

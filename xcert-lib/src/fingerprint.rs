@@ -2,7 +2,7 @@
 
 use crate::fields::DigestAlgorithm;
 use crate::util;
-use digest::Digest;
+use sha2::Digest;
 
 /// Compute the fingerprint of DER-encoded certificate bytes.
 ///

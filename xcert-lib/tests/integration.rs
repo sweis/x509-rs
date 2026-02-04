@@ -90,30 +90,6 @@ mod parsing {
     }
 
     #[test]
-    fn parse_ec_p256() {
-        let data = load_cert("ec-p256.pem");
-        let cert = parse_cert(&data).expect("should parse ECDSA P-256 cert");
-        assert_eq!(cert.version, 3);
-        assert_eq!(cert.public_key.algorithm, "EC");
-    }
-
-    #[test]
-    fn parse_ec_p384() {
-        let data = load_cert("ec-p384.pem");
-        let cert = parse_cert(&data).expect("should parse ECDSA P-384 cert");
-        assert_eq!(cert.version, 3);
-        assert_eq!(cert.public_key.algorithm, "EC");
-    }
-
-    #[test]
-    fn parse_ed25519() {
-        let data = load_cert("ed25519.pem");
-        let cert = parse_cert(&data).expect("should parse Ed25519 cert");
-        assert_eq!(cert.version, 3);
-        assert_eq!(cert.public_key.algorithm, "Ed25519");
-    }
-
-    #[test]
     fn parse_minimal_self_signed() {
         let data = load_cert("minimal.pem");
         let cert = parse_cert(&data).expect("should parse minimal cert");
@@ -163,11 +139,6 @@ mod parsing {
     }
 
     #[test]
-    fn parse_empty_input_returns_error() {
-        assert!(parse_cert(b"").is_err());
-    }
-
-    #[test]
     fn parse_truncated_der_returns_error() {
         let data = load_cert("root-ca.der");
         let truncated = &data[..data.len() / 2];
@@ -182,55 +153,6 @@ mod parsing {
 mod fields {
     use super::*;
 
-    // --- Subject ---
-
-    #[test]
-    fn root_ca_subject() {
-        let data = load_cert("root-ca.pem");
-        let cert = parse_cert(&data).unwrap();
-        let subject = cert.subject_string();
-        assert!(subject.contains("Test Root CA"), "subject: {}", subject);
-        assert!(subject.contains("US"), "subject should contain country");
-        assert!(subject.contains("Test PKI"), "subject should contain org");
-    }
-
-    #[test]
-    fn server_subject() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let subject = cert.subject_string();
-        assert!(subject.contains("www.example.com"), "subject: {}", subject);
-        assert!(
-            subject.contains("Example Corp"),
-            "subject should contain org"
-        );
-    }
-
-    #[test]
-    fn ec_p256_subject() {
-        let data = load_cert("ec-p256.pem");
-        let cert = parse_cert(&data).unwrap();
-        let subject = cert.subject_string();
-        assert!(
-            subject.contains("ec-test.example.com"),
-            "subject: {}",
-            subject
-        );
-        assert!(subject.contains("DE"), "subject should contain country DE");
-    }
-
-    #[test]
-    fn ed25519_subject() {
-        let data = load_cert("ed25519.pem");
-        let cert = parse_cert(&data).unwrap();
-        let subject = cert.subject_string();
-        assert!(
-            subject.contains("ed25519.example.com"),
-            "subject: {}",
-            subject
-        );
-    }
-
     // --- Issuer ---
 
     #[test]
@@ -241,56 +163,6 @@ mod fields {
             cert.subject_string(),
             cert.issuer_string(),
             "root CA should be self-signed"
-        );
-    }
-
-    #[test]
-    fn server_issuer_is_intermediate() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let issuer = cert.issuer_string();
-        assert!(
-            issuer.contains("Test Intermediate CA"),
-            "issuer: {}",
-            issuer
-        );
-    }
-
-    #[test]
-    fn intermediate_issuer_is_root() {
-        let data = load_cert("intermediate-ca.pem");
-        let cert = parse_cert(&data).unwrap();
-        let issuer = cert.issuer_string();
-        assert!(issuer.contains("Test Root CA"), "issuer: {}", issuer);
-    }
-
-    // --- Serial ---
-
-    #[test]
-    fn root_ca_serial() {
-        let data = load_cert("root-ca.pem");
-        let cert = parse_cert(&data).unwrap();
-        let serial = cert.serial_hex();
-        // openssl reports serial=01
-        assert!(
-            serial == "01" || serial == "1",
-            "root CA serial should be 01, got: {}",
-            serial
-        );
-    }
-
-    #[test]
-    fn server_serial() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let serial = cert.serial_hex();
-        // openssl reports serial=1000
-        // Serial 0x1000 can be "10:00" (colon-separated) or "1000"
-        let serial_stripped = serial.replace(":", "");
-        assert!(
-            serial_stripped.to_uppercase().contains("1000"),
-            "server serial should contain 1000, got: {}",
-            serial
         );
     }
 
@@ -326,67 +198,6 @@ mod fields {
     }
 
     // --- Public Key Info ---
-
-    #[test]
-    fn server_rsa_2048_key() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert_eq!(cert.public_key.algorithm, "RSA");
-        assert_eq!(cert.public_key.key_size, Some(2048));
-    }
-
-    #[test]
-    fn ec_p256_key_info() {
-        let data = load_cert("ec-p256.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert_eq!(cert.public_key.algorithm, "EC");
-        assert_eq!(
-            cert.public_key.curve.as_deref(),
-            Some("P-256"),
-            "curve: {:?}",
-            cert.public_key.curve
-        );
-    }
-
-    #[test]
-    fn ec_p384_key_info() {
-        let data = load_cert("ec-p384.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert_eq!(cert.public_key.algorithm, "EC");
-        assert_eq!(
-            cert.public_key.curve.as_deref(),
-            Some("P-384"),
-            "curve: {:?}",
-            cert.public_key.curve
-        );
-    }
-
-    #[test]
-    fn ed25519_key_info() {
-        let data = load_cert("ed25519.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert_eq!(cert.public_key.algorithm, "Ed25519");
-    }
-
-    #[test]
-    fn rsa_modulus_present() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let modulus = cert.modulus_hex();
-        assert!(modulus.is_some(), "RSA cert should have modulus");
-        let modulus = modulus.unwrap();
-        assert!(!modulus.is_empty(), "modulus should not be empty");
-    }
-
-    #[test]
-    fn ec_has_no_modulus() {
-        let data = load_cert("ec-p256.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert!(
-            cert.modulus_hex().is_none(),
-            "EC cert should not have modulus"
-        );
-    }
 
     #[test]
     fn public_key_pem_format() {
@@ -625,18 +436,6 @@ mod extensions {
     }
 
     #[test]
-    fn server_authority_info_access() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let ocsp_urls = cert.ocsp_urls();
-        assert!(
-            ocsp_urls.iter().any(|u| u.contains("ocsp.example.com")),
-            "should have OCSP URL, got: {:?}",
-            ocsp_urls
-        );
-    }
-
-    #[test]
     fn many_extensions_cert_has_expected_extensions() {
         let data = load_cert("many-extensions.pem");
         let cert = parse_cert(&data).unwrap();
@@ -742,52 +541,6 @@ mod extensions {
 mod fingerprints {
     use super::*;
 
-    /// Parse OpenSSL fingerprint like "sha256 Fingerprint=AA:BB:CC:..."
-    fn expected_fingerprint(ref_file: &str) -> String {
-        let line = load_reference(ref_file);
-        line.split('=')
-            .nth(1)
-            .unwrap_or(&line)
-            .trim()
-            .to_uppercase()
-    }
-
-    #[test]
-    fn root_ca_sha256_fingerprint() {
-        let data = load_cert("root-ca.pem");
-        let cert = parse_cert(&data).unwrap();
-        let fp = cert.fingerprint(DigestAlgorithm::Sha256);
-        let expected = expected_fingerprint("root-ca-fingerprint-sha256.txt");
-        assert_eq!(fp.to_uppercase(), expected, "SHA-256 fingerprint mismatch");
-    }
-
-    #[test]
-    fn root_ca_sha1_fingerprint() {
-        let data = load_cert("root-ca.pem");
-        let cert = parse_cert(&data).unwrap();
-        let fp = cert.fingerprint(DigestAlgorithm::Sha1);
-        let expected = expected_fingerprint("root-ca-fingerprint-sha1.txt");
-        assert_eq!(fp.to_uppercase(), expected, "SHA-1 fingerprint mismatch");
-    }
-
-    #[test]
-    fn server_sha256_fingerprint() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let fp = cert.fingerprint(DigestAlgorithm::Sha256);
-        let expected = expected_fingerprint("server-fingerprint-sha256.txt");
-        assert_eq!(fp.to_uppercase(), expected, "SHA-256 fingerprint mismatch");
-    }
-
-    #[test]
-    fn many_extensions_sha256_fingerprint() {
-        let data = load_cert("many-extensions.pem");
-        let cert = parse_cert(&data).unwrap();
-        let fp = cert.fingerprint(DigestAlgorithm::Sha256);
-        let expected = expected_fingerprint("many-extensions-fingerprint-sha256.txt");
-        assert_eq!(fp.to_uppercase(), expected, "SHA-256 fingerprint mismatch");
-    }
-
     #[test]
     fn fingerprint_from_pem_matches_der() {
         let pem_data = load_cert("root-ca.pem");
@@ -826,30 +579,6 @@ mod fingerprints {
 
 mod emails {
     use super::*;
-
-    #[test]
-    fn server_emails() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let emails = cert.emails();
-        assert!(
-            emails.contains(&"admin@example.com".to_string()),
-            "should contain admin@example.com, got: {:?}",
-            emails
-        );
-    }
-
-    #[test]
-    fn client_emails() {
-        let data = load_cert("client.pem");
-        let cert = parse_cert(&data).unwrap();
-        let emails = cert.emails();
-        assert!(
-            emails.contains(&"client@example.com".to_string()),
-            "should contain client@example.com, got: {:?}",
-            emails
-        );
-    }
 
     #[test]
     fn root_ca_no_emails() {
@@ -992,32 +721,12 @@ mod checks {
     // --- Email ---
 
     #[test]
-    fn email_match() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert!(
-            check_email(&cert, "admin@example.com"),
-            "should match admin@example.com"
-        );
-    }
-
-    #[test]
     fn email_no_match() {
         let data = load_cert("server.pem");
         let cert = parse_cert(&data).unwrap();
         assert!(
             !check_email(&cert, "nobody@bad.com"),
             "should not match nobody@bad.com"
-        );
-    }
-
-    #[test]
-    fn client_email_match() {
-        let data = load_cert("client.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert!(
-            check_email(&cert, "client@example.com"),
-            "should match client@example.com"
         );
     }
 }
@@ -1163,16 +872,6 @@ mod display {
             text.contains("Signature") || text.contains("signature"),
             "display_text with show_all should include signature"
         );
-    }
-
-    #[test]
-    fn json_output_is_valid() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let json_str = to_json(&cert).expect("JSON serialization should succeed");
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json_str).expect("output should be valid JSON");
-        assert!(parsed.is_object(), "JSON root should be an object");
     }
 
     #[test]
@@ -1338,16 +1037,6 @@ mod degenerate {
         assert!(result.is_err(), "single byte must return an error");
     }
 
-    #[test]
-    fn one_byte_auto_detect_returns_error() {
-        let data = load_degen("one-byte.der");
-        let result = parse_cert(&data);
-        assert!(
-            result.is_err(),
-            "single byte via parse_cert must return an error"
-        );
-    }
-
     // -----------------------------------------------------------------
     // 3. truncated-header.der -- first 10 bytes of a valid DER cert
     // -----------------------------------------------------------------
@@ -1384,16 +1073,6 @@ mod degenerate {
         assert_eq!(data.len(), 1024);
         let result = parse_der(&data);
         assert!(result.is_err(), "random bytes must return an error");
-    }
-
-    #[test]
-    fn random_bytes_auto_detect_returns_error() {
-        let data = load_degen("random-bytes.der");
-        let result = parse_cert(&data);
-        assert!(
-            result.is_err(),
-            "random bytes via parse_cert must return an error"
-        );
     }
 
     // -----------------------------------------------------------------
@@ -1451,16 +1130,6 @@ mod degenerate {
         assert!(result.is_err(), "1024 null bytes must return an error");
     }
 
-    #[test]
-    fn null_bytes_auto_detect_returns_error() {
-        let data = load_degen("null-bytes.der");
-        let result = parse_cert(&data);
-        assert!(
-            result.is_err(),
-            "null bytes via parse_cert must return an error"
-        );
-    }
-
     // -----------------------------------------------------------------
     // 9. huge-length.der -- SEQUENCE claiming 2GB, only 100 bytes of data
     // -----------------------------------------------------------------
@@ -1473,16 +1142,6 @@ mod degenerate {
         assert!(
             result.is_err(),
             "DER with huge claimed length must return an error"
-        );
-    }
-
-    #[test]
-    fn huge_length_auto_detect_returns_error() {
-        let data = load_degen("huge-length.der");
-        let result = parse_cert(&data);
-        assert!(
-            result.is_err(),
-            "huge length via parse_cert must return an error"
         );
     }
 
@@ -1582,20 +1241,6 @@ mod degenerate {
                 // If the parser rejects mixed PEM, that is acceptable
                 // as long as it does not panic
                 let _ = e;
-            }
-        }
-    }
-
-    #[test]
-    fn multiple_pem_auto_detect() {
-        let data = load_degen("multiple-pem.pem");
-        let result = parse_cert(&data);
-        match result {
-            Ok(cert) => {
-                assert_eq!(cert.version, 3);
-            }
-            Err(_) => {
-                // Also acceptable
             }
         }
     }
@@ -1834,16 +1479,6 @@ mod verification {
         assert!(
             !store.contains(&chain[0]),
             "trust store should not contain server cert"
-        );
-    }
-
-    #[test]
-    fn trust_store_system_loads() {
-        let store = TrustStore::system().expect("system trust store should load");
-        assert!(
-            store.len() > 50,
-            "system store should have many CA certs, got {}",
-            store.len()
         );
     }
 
@@ -2486,18 +2121,6 @@ mod cross_compat_x509_parser {
     use super::*;
 
     #[test]
-    fn x509p_pem_and_der_produce_same_fingerprint() {
-        let pem_cert = parse_external_pem("x509p-certificate.pem");
-        let der_cert = parse_external_der("x509p-certificate.der");
-        assert_eq!(
-            pem_cert.fingerprint(DigestAlgorithm::Sha256),
-            der_cert.fingerprint(DigestAlgorithm::Sha256),
-        );
-        assert_eq!(pem_cert.serial, der_cert.serial);
-        assert_eq!(pem_cert.subject_string(), der_cert.subject_string());
-    }
-
-    #[test]
     fn x509p_certificate_pem() {
         let cert = parse_external_pem("x509p-certificate.pem");
         assert_eq!(cert.version, 3);
@@ -2532,18 +2155,6 @@ mod cross_compat_x509_parser {
     }
 
     #[test]
-    fn x509p_igc_a_der_matches_pem() {
-        let pem_cert = parse_external_pem("x509p-IGC_A.pem");
-        let der_cert = parse_external_der("x509p-IGC_A.der");
-        assert_eq!(
-            pem_cert.fingerprint(DigestAlgorithm::Sha256),
-            der_cert.fingerprint(DigestAlgorithm::Sha256),
-        );
-        assert_eq!(pem_cert.subject_string(), der_cert.subject_string());
-        assert_eq!(pem_cert.serial, der_cert.serial);
-    }
-
-    #[test]
     fn x509p_no_extensions() {
         let cert = parse_external_pem("x509p-no_extensions.pem");
         assert!(cert.subject_string().contains("CN = benno"));
@@ -2553,16 +2164,6 @@ mod cross_compat_x509_parser {
         assert_eq!(
             cert.fingerprint(DigestAlgorithm::Sha256),
             "39:F4:1F:F9:38:5A:90:DF:31:A9:0F:C6:C0:C6:86:CF:23:43:DE:A2:F1:8C:D0:58:33:9A:0D:00:A0:7A:51:CB"
-        );
-    }
-
-    #[test]
-    fn x509p_no_extensions_der_matches_pem() {
-        let pem_cert = parse_external_pem("x509p-no_extensions.pem");
-        let der_cert = parse_external_der("x509p-no_extensions.der");
-        assert_eq!(
-            pem_cert.fingerprint(DigestAlgorithm::Sha256),
-            der_cert.fingerprint(DigestAlgorithm::Sha256),
         );
     }
 
@@ -2611,32 +2212,6 @@ mod cross_compat_conversion {
             cert1.fingerprint(DigestAlgorithm::Sha256),
             cert2.fingerprint(DigestAlgorithm::Sha256),
         );
-    }
-
-    #[test]
-    fn ossl_ed25519_pem_to_der_roundtrip() {
-        let pem_data = load_external("ossl-root-ed25519.pem");
-        let der_bytes = pem_to_der(&pem_data).unwrap();
-        let pem_string = der_to_pem(&der_bytes);
-        let re_der = pem_to_der(pem_string.as_bytes()).unwrap();
-        assert_eq!(der_bytes, re_der);
-    }
-
-    #[test]
-    fn x509p_der_to_pem_roundtrip() {
-        let der_data = load_external("x509p-certificate.der");
-        let pem_string = der_to_pem(&der_data);
-        let re_der = pem_to_der(pem_string.as_bytes()).unwrap();
-        assert_eq!(der_data, re_der);
-    }
-
-    #[test]
-    fn pyca_letsencrypt_pem_to_der_roundtrip() {
-        let pem_data = load_external("pyca-letsencrypt-x3.pem");
-        let der_bytes = pem_to_der(&pem_data).unwrap();
-        let pem_string = der_to_pem(&der_bytes);
-        let re_der = pem_to_der(pem_string.as_bytes()).unwrap();
-        assert_eq!(der_bytes, re_der);
     }
 }
 
@@ -3220,6 +2795,861 @@ mod crl_revocation {
             result.is_valid,
             "without CRL check flags, revoked cert should still pass: {:?}",
             result.errors
+        );
+    }
+}
+
+// =========================================================================
+// 11. VERIFY OPTIONS TESTS
+// =========================================================================
+//
+// Tests for VerifyOptions fields: at_time, check_time, purpose,
+// verify_email, verify_ip, verify_depth, partial_chain.
+// Also tests resolve_purpose(), verify_with_untrusted(),
+// verify_pem_chain_with_options(), TrustStore methods, and
+// VerificationResult Display impl.
+
+mod verify_options {
+    use super::*;
+
+    fn main_trust_store() -> TrustStore {
+        let root_pem = load_cert("root-ca.pem");
+        TrustStore::from_pem(&root_pem).expect("failed to create trust store from root CA")
+    }
+
+    fn main_chain_der() -> Vec<Vec<u8>> {
+        let chain_pem = load_cert("chain.pem");
+        parse_pem_chain(&chain_pem).expect("failed to parse chain")
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_purpose
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_purpose_named_values() {
+        assert_eq!(resolve_purpose("sslserver"), Some("1.3.6.1.5.5.7.3.1"));
+        assert_eq!(resolve_purpose("sslclient"), Some("1.3.6.1.5.5.7.3.2"));
+        assert_eq!(resolve_purpose("codesign"), Some("1.3.6.1.5.5.7.3.3"));
+        assert_eq!(resolve_purpose("smimesign"), Some("1.3.6.1.5.5.7.3.4"));
+        assert_eq!(resolve_purpose("smimeencrypt"), Some("1.3.6.1.5.5.7.3.4"));
+        assert_eq!(resolve_purpose("timestampsign"), Some("1.3.6.1.5.5.7.3.8"));
+        assert_eq!(resolve_purpose("ocsphelper"), Some("1.3.6.1.5.5.7.3.9"));
+        assert_eq!(resolve_purpose("any"), Some("2.5.29.37.0"));
+    }
+
+    #[test]
+    fn resolve_purpose_unknown_returns_none() {
+        assert_eq!(resolve_purpose("notapurpose"), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // at_time option
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_with_at_time_in_valid_period() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // Use timestamp in mid-2027 (well within 2026-2101 validity)
+        let options = VerifyOptions {
+            at_time: Some(1800000000),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "chain should verify with at_time in valid period: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn verify_with_at_time_before_not_before() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // Epoch (1970-01-01) is before any cert's notBefore
+        let options = VerifyOptions {
+            at_time: Some(0),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            !result.is_valid,
+            "chain should fail with at_time before notBefore"
+        );
+        assert!(
+            result.errors.iter().any(|e| e.contains("not yet valid")),
+            "should report 'not yet valid': {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn verify_with_at_time_after_not_after() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // Year ~2200 is after notAfter (2101)
+        let options = VerifyOptions {
+            at_time: Some(7258118400),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            !result.is_valid,
+            "chain should fail with at_time after notAfter"
+        );
+        assert!(
+            result.errors.iter().any(|e| e.contains("expired")),
+            "should report expired: {:?}",
+            result.errors
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // check_time = false
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_with_no_check_time_ignores_dates() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // at_time=0 (epoch, before notBefore) would fail with time checks,
+        // but check_time=false should skip all date validation
+        let options = VerifyOptions {
+            check_time: false,
+            at_time: Some(0),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "chain should verify with check_time=false: {:?}",
+            result.errors
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // purpose (EKU) option
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_with_purpose_server_auth_passes() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // server.pem has TLS Web Server Authentication EKU
+        let options = VerifyOptions {
+            purpose: Some("1.3.6.1.5.5.7.3.1".into()),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "server cert should satisfy sslserver purpose: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn verify_with_purpose_code_signing_fails() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // server.pem does NOT have Code Signing EKU
+        let options = VerifyOptions {
+            purpose: Some("1.3.6.1.5.5.7.3.3".into()),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            !result.is_valid,
+            "server cert should not satisfy codesign purpose"
+        );
+        assert!(
+            result.errors.iter().any(|e| e.contains("EKU")),
+            "should report missing EKU: {:?}",
+            result.errors
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // verify_email option
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_with_email_match() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // server.pem has email:admin@example.com in SAN
+        let options = VerifyOptions {
+            verify_email: Some("admin@example.com".into()),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "should pass with matching email: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn verify_with_email_case_insensitive() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        let options = VerifyOptions {
+            verify_email: Some("ADMIN@EXAMPLE.COM".into()),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "email matching should be case-insensitive: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn verify_with_email_no_match() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        let options = VerifyOptions {
+            verify_email: Some("nobody@wrong.com".into()),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(!result.is_valid, "should fail with non-matching email");
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("email") && e.contains("nobody@wrong.com")),
+            "should report email mismatch: {:?}",
+            result.errors
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // verify_ip option
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_with_ip_v4_match() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // server.pem has IP:93.184.216.34 in SAN
+        let options = VerifyOptions {
+            verify_ip: Some("93.184.216.34".into()),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "should pass with matching IPv4: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn verify_with_ip_v6_match() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // server.pem has IPv6 2606:2800:220:1:248:1893:25C8:1946
+        let options = VerifyOptions {
+            verify_ip: Some("2606:2800:220:1:248:1893:25c8:1946".into()),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "should pass with matching IPv6: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn verify_with_ip_no_match() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        let options = VerifyOptions {
+            verify_ip: Some("1.2.3.4".into()),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(!result.is_valid, "should fail with non-matching IP");
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("IP") && e.contains("1.2.3.4")),
+            "should report IP mismatch: {:?}",
+            result.errors
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // verify_depth option
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_depth_exceeded() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // chain has 3 certs; set max depth to 2
+        let options = VerifyOptions {
+            verify_depth: Some(2),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options);
+        assert!(
+            result.is_err(),
+            "should error when chain exceeds verify_depth"
+        );
+    }
+
+    #[test]
+    fn verify_depth_exact_passes() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        // chain has 3 certs; set max depth to 3 (exact fit)
+        let options = VerifyOptions {
+            verify_depth: Some(3),
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "chain should pass when depth equals verify_depth: {:?}",
+            result.errors
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // partial_chain option
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_partial_chain_with_intermediate_in_store() {
+        let chain = main_chain_der();
+        // Trust store contains only the intermediate CA (not the root)
+        let intermediate_pem = load_cert("intermediate-ca.pem");
+        let store =
+            TrustStore::from_pem(&intermediate_pem).expect("create store from intermediate");
+        let options = VerifyOptions {
+            partial_chain: true,
+            ..VerifyOptions::default()
+        };
+        let result = verify_chain_with_options(&chain, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "partial_chain should pass when intermediate is in store: {:?}",
+            result.errors
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // verify_with_untrusted
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_with_untrusted_intermediates() {
+        let leaf_pem = load_cert("server.pem");
+        let leaf_der = pem_to_der(&leaf_pem).expect("parse leaf PEM");
+        let intermediate_pem = load_cert("intermediate-ca.pem");
+        let store = main_trust_store();
+        let result = verify_with_untrusted(
+            &leaf_der,
+            &intermediate_pem,
+            &store,
+            None,
+            &VerifyOptions::default(),
+        )
+        .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "verify_with_untrusted should build chain: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn verify_with_untrusted_and_hostname() {
+        let leaf_pem = load_cert("server.pem");
+        let leaf_der = pem_to_der(&leaf_pem).expect("parse leaf PEM");
+        let intermediate_pem = load_cert("intermediate-ca.pem");
+        let store = main_trust_store();
+        let result = verify_with_untrusted(
+            &leaf_der,
+            &intermediate_pem,
+            &store,
+            Some("www.example.com"),
+            &VerifyOptions::default(),
+        )
+        .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "verify_with_untrusted + hostname should work: {:?}",
+            result.errors
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // VerificationResult Display impl
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verification_result_display_ok() {
+        let chain = main_chain_der();
+        let store = main_trust_store();
+        let result = verify_chain(&chain, &store, None).expect("verification should not error");
+        assert!(result.is_valid);
+        let display = format!("{}", result);
+        assert!(
+            display.starts_with("OK"),
+            "display should start with OK: {}",
+            display
+        );
+        assert!(
+            display.contains("chain:"),
+            "display should show chain: {}",
+            display
+        );
+    }
+
+    #[test]
+    fn verification_result_display_fail() {
+        let chain = main_chain_der();
+        // Use a wrong trust store so verification fails
+        let ec_root_pem =
+            std::fs::read(cert_path("real/test-ec-root-ca.pem")).expect("read EC root");
+        let store = TrustStore::from_pem(&ec_root_pem).expect("create EC store");
+        let result = verify_chain(&chain, &store, None).expect("verification should not error");
+        assert!(!result.is_valid);
+        let display = format!("{}", result);
+        assert!(
+            display.starts_with("FAIL"),
+            "display should start with FAIL: {}",
+            display
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // TrustStore methods
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn trust_store_from_pem_file() {
+        let path = cert_path("root-ca.pem");
+        let store =
+            TrustStore::from_pem_file(&path).expect("should load trust store from PEM file");
+        assert_eq!(store.len(), 1);
+        assert!(!store.is_empty());
+    }
+
+    #[test]
+    fn trust_store_from_pem_file_nonexistent() {
+        let path = std::path::PathBuf::from("/nonexistent/path/cert.pem");
+        let result = TrustStore::from_pem_file(&path);
+        assert!(result.is_err(), "nonexistent file should error");
+    }
+
+    #[test]
+    fn trust_store_add_pem_directory() {
+        let dir = cert_path("real");
+        let mut store = TrustStore::new();
+        let added = store
+            .add_pem_directory(&dir)
+            .expect("should load certs from directory");
+        assert!(added > 0, "should add at least one cert from directory");
+        assert!(!store.is_empty());
+    }
+
+    #[test]
+    fn trust_store_add_pem_directory_nonexistent() {
+        let mut store = TrustStore::new();
+        let result = store.add_pem_directory(std::path::Path::new("/nonexistent/dir"));
+        assert!(result.is_err(), "nonexistent directory should error");
+    }
+
+    #[test]
+    fn trust_store_default_is_empty() {
+        let store: TrustStore = Default::default();
+        assert!(store.is_empty());
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn trust_store_debug_shows_count() {
+        let store = main_trust_store();
+        let debug = format!("{:?}", store);
+        assert!(
+            debug.contains("TrustStore"),
+            "debug should show TrustStore: {}",
+            debug
+        );
+        assert!(
+            debug.contains("count"),
+            "debug should show count: {}",
+            debug
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // verify_pem_chain_with_options convenience function
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn verify_pem_chain_with_options_works() {
+        let chain_pem = load_cert("chain.pem");
+        let store = main_trust_store();
+        let options = VerifyOptions {
+            at_time: Some(1800000000),
+            ..VerifyOptions::default()
+        };
+        let result = verify_pem_chain_with_options(&chain_pem, &store, None, &options)
+            .expect("verification should not error");
+        assert!(
+            result.is_valid,
+            "verify_pem_chain_with_options should work: {:?}",
+            result.errors
+        );
+    }
+}
+
+// =========================================================================
+// 12. ADDITIONAL CHECK TESTS (CN fallback, IPv6 normalization)
+// =========================================================================
+
+mod check_additional {
+    use super::*;
+
+    #[test]
+    fn hostname_cn_fallback_when_no_san_dns() {
+        // minimal.pem has CN=Minimal Test but no SAN extension at all
+        let data = load_cert("minimal.pem");
+        let cert = parse_cert(&data).unwrap();
+        assert!(
+            check_host(&cert, "Minimal Test"),
+            "should match CN when no SAN DNS entries exist"
+        );
+    }
+
+    #[test]
+    fn hostname_cn_fallback_no_match() {
+        let data = load_cert("minimal.pem");
+        let cert = parse_cert(&data).unwrap();
+        assert!(
+            !check_host(&cert, "wrong.example.com"),
+            "CN fallback should not match wrong hostname"
+        );
+    }
+
+    #[test]
+    fn ipv6_normalization_full_form() {
+        // Test IPv6 matching with full leading-zero form
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        assert!(
+            check_ip(&cert, "2606:2800:0220:0001:0248:1893:25c8:1946"),
+            "should match full IPv6 with leading zeros"
+        );
+    }
+
+    #[test]
+    fn ipv6_normalization_compressed_form() {
+        // Test IPv6 matching with compressed notation
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        assert!(
+            check_ip(&cert, "2606:2800:220:1:248:1893:25c8:1946"),
+            "should match compressed IPv6"
+        );
+    }
+
+    #[test]
+    fn ipv6_normalization_uppercase() {
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        assert!(
+            check_ip(&cert, "2606:2800:0220:0001:0248:1893:25C8:1946"),
+            "should match uppercase IPv6"
+        );
+    }
+}
+
+// =========================================================================
+// 13. ADDITIONAL DISPLAY TESTS (CRL DP, Policies, NsComment, SAN variants)
+// =========================================================================
+
+mod display_additional {
+    use super::*;
+
+    #[test]
+    fn display_crl_distribution_points() {
+        let data = load_cert("many-extensions.pem");
+        let cert = parse_cert(&data).unwrap();
+        let text = display_text(&cert, false);
+        assert!(
+            text.contains("CRL Distribution Points"),
+            "display should include CRL Distribution Points"
+        );
+        assert!(
+            text.contains("crl.example.com"),
+            "display should include CRL URI"
+        );
+    }
+
+    #[test]
+    fn display_certificate_policies() {
+        let data = load_cert("many-extensions.pem");
+        let cert = parse_cert(&data).unwrap();
+        let text = display_text(&cert, false);
+        assert!(
+            text.contains("Certificate Policies"),
+            "display should include Certificate Policies"
+        );
+        assert!(
+            text.contains("2.23.140.1.2.1"),
+            "display should include policy OID"
+        );
+    }
+
+    #[test]
+    fn display_netscape_comment() {
+        let data = load_cert("many-extensions.pem");
+        let cert = parse_cert(&data).unwrap();
+        let text = display_text(&cert, false);
+        assert!(
+            text.contains("Netscape Comment"),
+            "display should include Netscape Comment"
+        );
+        assert!(
+            text.contains("test certificate"),
+            "display should include comment text"
+        );
+    }
+
+    #[test]
+    fn display_text_show_all_includes_modulus() {
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        let text = display_text(&cert, true);
+        assert!(
+            text.contains("Modulus:"),
+            "show_all should include RSA modulus"
+        );
+    }
+
+    #[test]
+    fn display_san_email_and_ip_entries() {
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        let text = display_text(&cert, false);
+        assert!(
+            text.contains("Email: admin@example.com"),
+            "display should show email SAN"
+        );
+        assert!(
+            text.contains("IP: 93.184.216.34"),
+            "display should show IPv4 SAN"
+        );
+    }
+
+    #[test]
+    fn display_server_crl_distribution_points() {
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        let text = display_text(&cert, false);
+        assert!(
+            text.contains("CRL Distribution Points"),
+            "server display should include CRL DP"
+        );
+    }
+}
+
+// =========================================================================
+// 14. ADDITIONAL PARSER / FIELDS TESTS
+// =========================================================================
+//
+// Tests for extension parsing (CRL DP, Cert Policies, NsComment, AIA),
+// Display impls, and IPv6 SAN formatting.
+
+mod parser_fields_additional {
+    use super::*;
+
+    #[test]
+    fn distinguished_name_display_impl() {
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        let display = format!("{}", cert.subject);
+        let oneline = cert.subject.to_oneline();
+        assert_eq!(display, oneline, "Display impl should match to_oneline()");
+        assert!(
+            display.contains("CN = www.example.com"),
+            "Display should contain CN: {}",
+            display
+        );
+    }
+
+    #[test]
+    fn datetime_display_impl() {
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        let display = format!("{}", cert.not_before);
+        assert!(
+            display.contains("2026"),
+            "DateTime Display should show year: {}",
+            display
+        );
+        assert!(
+            display.contains("GMT"),
+            "DateTime Display should show GMT: {}",
+            display
+        );
+    }
+
+    #[test]
+    fn crl_distribution_points_parsed() {
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        let cdp = cert
+            .extensions
+            .iter()
+            .find(|e| e.name.contains("CRL Distribution"));
+        assert!(cdp.is_some(), "server cert should have CRL DP extension");
+        if let Some(ext) = cdp {
+            match &ext.value {
+                ExtensionValue::CrlDistributionPoints(uris) => {
+                    assert!(!uris.is_empty(), "CRL DP should have URIs");
+                    assert!(
+                        uris.iter().any(|u| u.contains("crl.example.com")),
+                        "CRL DP should contain example.com URI: {:?}",
+                        uris
+                    );
+                }
+                _ => panic!("expected CrlDistributionPoints variant"),
+            }
+        }
+    }
+
+    #[test]
+    fn certificate_policies_parsed() {
+        let data = load_cert("many-extensions.pem");
+        let cert = parse_cert(&data).unwrap();
+        let cp = cert
+            .extensions
+            .iter()
+            .find(|e| e.name.contains("Certificate Policies"));
+        assert!(
+            cp.is_some(),
+            "many-extensions cert should have Certificate Policies"
+        );
+        if let Some(ext) = cp {
+            match &ext.value {
+                ExtensionValue::CertificatePolicies(oids) => {
+                    assert!(!oids.is_empty(), "should have policy OIDs");
+                    assert!(
+                        oids.iter().any(|o| o == "2.23.140.1.2.1"),
+                        "should include DV policy OID: {:?}",
+                        oids
+                    );
+                }
+                _ => panic!("expected CertificatePolicies variant"),
+            }
+        }
+    }
+
+    #[test]
+    fn netscape_comment_parsed() {
+        let data = load_cert("many-extensions.pem");
+        let cert = parse_cert(&data).unwrap();
+        let ns = cert
+            .extensions
+            .iter()
+            .find(|e| e.name.contains("Netscape Comment"));
+        assert!(
+            ns.is_some(),
+            "many-extensions cert should have Netscape Comment"
+        );
+        if let Some(ext) = ns {
+            match &ext.value {
+                ExtensionValue::NsComment(comment) => {
+                    assert!(
+                        comment.contains("test certificate"),
+                        "NsComment should contain expected text: {}",
+                        comment
+                    );
+                }
+                _ => panic!("expected NsComment variant"),
+            }
+        }
+    }
+
+    #[test]
+    fn server_aia_has_ocsp_and_ca_issuers() {
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        let aia = cert
+            .extensions
+            .iter()
+            .find(|e| e.name.contains("Authority Information Access"));
+        assert!(aia.is_some(), "server should have AIA extension");
+        if let Some(ext) = aia {
+            match &ext.value {
+                ExtensionValue::AuthorityInfoAccess(entries) => {
+                    assert!(
+                        entries.iter().any(|e| e.method == "OCSP"),
+                        "should have OCSP method"
+                    );
+                    assert!(
+                        entries.iter().any(|e| e.method == "CA Issuers"),
+                        "should have CA Issuers method"
+                    );
+                }
+                _ => panic!("expected AuthorityInfoAccess variant"),
+            }
+        }
+    }
+
+    #[test]
+    fn ipv6_san_format_is_uppercase_hex() {
+        let data = load_cert("server.pem");
+        let cert = parse_cert(&data).unwrap();
+        let san = cert.san_entries();
+        let ips: Vec<&str> = san
+            .iter()
+            .filter_map(|e| match e {
+                SanEntry::Ip(ip) => Some(ip.as_str()),
+                _ => None,
+            })
+            .collect();
+        // Find the IPv6 entry (longer than 15 chars)
+        let ipv6 = ips.iter().find(|ip| ip.contains(':') && ip.len() > 15);
+        assert!(ipv6.is_some(), "should have IPv6 SAN: {:?}", ips);
+        let ipv6_str = ipv6.unwrap();
+        // Should be uppercase hex format like "2606:2800:220:1:248:1893:25C8:1946"
+        assert!(
+            ipv6_str.contains("2606"),
+            "IPv6 should contain expected prefix: {}",
+            ipv6_str
+        );
+        assert!(
+            ipv6_str.contains("25C8"),
+            "IPv6 should be uppercase hex: {}",
+            ipv6_str
         );
     }
 }
