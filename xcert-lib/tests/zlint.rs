@@ -278,11 +278,7 @@ fn rsa_certs_have_rsa_key_type() {
             let is_rsa = algo.contains("RSA")
                 || algo.contains("rsa")
                 || algo.contains("1.2.840.113549.1.1.");
-            assert!(
-                is_rsa,
-                "{}: expected RSA key type but got '{}'",
-                name, algo
-            );
+            assert!(is_rsa, "{}: expected RSA key type but got '{}'", name, algo);
             checked += 1;
         }
     }
@@ -308,7 +304,10 @@ fn ca_certs_have_ca_flag() {
 
         if let Ok(cert) = parse_zlint_cert(path) {
             let is_ca = cert.extensions.iter().any(|ext| {
-                matches!(&ext.value, ExtensionValue::BasicConstraints { ca: true, .. })
+                matches!(
+                    &ext.value,
+                    ExtensionValue::BasicConstraints { ca: true, .. }
+                )
             });
             assert!(
                 is_ca,
