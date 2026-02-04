@@ -5,28 +5,28 @@ Certificate:
         Signature Algorithm: ED25519
         Issuer: C = CH, O = EdDSA Test, CN = ed25519.example.com
         Validity
-            Not Before: Feb  3 23:57:06 2026 GMT
-            Not After : Feb  3 23:57:06 2101 GMT
+            Not Before: Feb  4 06:32:17 2026 GMT
+            Not After : Feb  4 06:32:17 2101 GMT
         Subject: C = CH, O = EdDSA Test, CN = ed25519.example.com
         Subject Public Key Info:
             Public Key Algorithm: ED25519
                 ED25519 Public-Key:
                 pub:
-                    fd:d8:e7:06:0c:da:9f:91:ab:bf:c0:cf:cc:7a:de:
-                    83:05:24:4b:37:93:c1:ca:8c:a7:c1:17:7d:61:2f:
-                    0e:03
+                    78:f0:ca:fa:e2:03:34:e6:5b:6c:c1:5f:af:c8:f8:
+                    84:a1:29:2f:b7:27:2f:d3:14:11:10:7c:0d:ca:75:
+                    79:49
         X509v3 extensions:
             X509v3 Basic Constraints: 
                 CA:FALSE
             X509v3 Key Usage: critical
                 Digital Signature
             X509v3 Subject Key Identifier: 
-                95:F4:04:AE:89:A6:F0:B8:63:31:D3:E4:C4:CF:EC:C3:07:CC:9F:97
+                49:1C:58:9C:7D:18:68:C5:0B:17:E0:F2:24:74:15:3A:6B:1F:53:E2
             X509v3 Subject Alternative Name: 
                 DNS:ed25519.example.com
     Signature Algorithm: ED25519
     Signature Value:
-        19:c7:ac:35:96:2a:91:10:4e:a8:27:7d:c0:d9:e8:39:6f:aa:
-        1c:66:77:45:ca:62:69:a4:ab:d7:16:43:90:b9:9d:48:48:14:
-        d8:26:0a:00:ea:cc:84:37:14:fd:80:f5:65:de:11:ca:19:72:
-        c0:d6:ed:78:c0:27:1f:42:a2:0c
+        76:8d:68:1d:2d:95:24:87:e5:3d:cd:b1:e5:dc:78:d4:b2:d6:
+        17:f3:4e:cb:19:4f:fc:14:67:f1:ef:5d:ef:05:4b:c1:36:b7:
+        2c:ad:4a:2c:da:a5:61:ab:09:d2:ee:62:7a:78:49:2f:b0:f7:
+        8c:4a:69:9f:f1:d3:1f:ac:0d:0f
