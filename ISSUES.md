@@ -4,16 +4,14 @@ Issues identified during code review. Ordered roughly by severity.
 
 ## Security / Correctness
 
-### 1. No certificate revocation checking (CRL/OCSP)
+### ~~1. No certificate revocation checking (CRL/OCSP)~~ FIXED
 
-`verify.rs` does not check whether certificates have been revoked. Neither
-CRL Distribution Points nor OCSP responder URLs are consulted during chain
-verification. A revoked intermediate or leaf certificate will verify
-successfully.
-
-**Impact:** A revoked certificate chain will pass verification.
-
-**Files:** `xcert-lib/src/verify.rs`
+**Fix:** Added CRL-based revocation checking. `VerifyOptions` now supports
+`crl_ders`, `crl_check_leaf`, and `crl_check_all` fields. CLI flags
+`--CRLfile`, `--crl-check`, and `--crl-check-all` load and check CRLs
+during chain verification, matching OpenSSL's `-CRLfile -crl_check` behavior.
+CRL signatures are verified against the issuer's public key. Revoked
+certificates are detected with reason codes.
 
 ---
 
@@ -35,14 +33,13 @@ considering the certificate valid. Not-yet-valid certificates return `false`.
 
 ---
 
-### 4. No Name Constraints checking
+### ~~4. No Name Constraints checking~~ FIXED
 
-The verification module does not enforce the Name Constraints extension
-(RFC 5280 Section 4.2.1.10). A CA certificate with Name Constraints limiting
-its scope to a specific domain could be used to sign certificates for
-arbitrary domains without triggering a verification error.
-
-**Files:** `xcert-lib/src/verify.rs`
+**Fix:** Added Name Constraints enforcement per RFC 5280 Section 4.2.1.10.
+During chain verification, CA certificates with Name Constraints have their
+permitted and excluded subtrees checked against all subordinate certificates'
+DNS names, email addresses, and IP addresses. Constraints from trust store
+roots are also checked. Test certificates with Name Constraints are included.
 
 ---
 

@@ -48,8 +48,8 @@ pub fn parse_pem(input: &[u8]) -> Result<CertificateInfo, XcertError> {
 
 /// Parse a certificate from DER format.
 pub fn parse_der(input: &[u8]) -> Result<CertificateInfo, XcertError> {
-    let (remaining, x509) = X509Certificate::from_der(input)
-        .map_err(|e| XcertError::DerError(format!("{}", e)))?;
+    let (remaining, x509) =
+        X509Certificate::from_der(input).map_err(|e| XcertError::DerError(format!("{}", e)))?;
 
     // Use only the actual certificate bytes, not any trailing data,
     // so that fingerprints are computed over the correct content.
@@ -154,9 +154,7 @@ fn build_datetime(asn1_time: &ASN1Time) -> DateTime {
     }
 }
 
-fn build_public_key_info(
-    spki: &SubjectPublicKeyInfo,
-) -> Result<PublicKeyInfo, XcertError> {
+fn build_public_key_info(spki: &SubjectPublicKeyInfo) -> Result<PublicKeyInfo, XcertError> {
     let oid_str = spki.algorithm.algorithm.to_id_string();
 
     let (algorithm, key_size, curve, modulus, exponent) = match oid_str.as_str() {
@@ -290,9 +288,7 @@ fn der_wrap(tag: u8, content: &[u8]) -> Vec<u8> {
     buf
 }
 
-fn build_extensions(
-    extensions: &[X509Extension],
-) -> Result<Vec<Extension>, XcertError> {
+fn build_extensions(extensions: &[X509Extension]) -> Result<Vec<Extension>, XcertError> {
     let mut result = Vec::new();
     for ext in extensions {
         result.push(build_extension(ext)?);
@@ -432,9 +428,7 @@ fn build_extension(ext: &X509Extension) -> Result<Extension, XcertError> {
                 .collect();
             ExtensionValue::CertificatePolicies(oids)
         }
-        ParsedExtension::NsCertComment(comment) => {
-            ExtensionValue::NsComment(comment.to_string())
-        }
+        ParsedExtension::NsCertComment(comment) => ExtensionValue::NsComment(comment.to_string()),
         _ => {
             let hex = hex::encode(ext.value);
             ExtensionValue::Raw(hex)

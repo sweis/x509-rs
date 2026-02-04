@@ -85,6 +85,12 @@ pub struct VerifyOptions {
     pub verify_email: Option<String>,
     /// IP address to verify against the leaf certificate's SAN.
     pub verify_ip: Option<String>,
+    /// DER-encoded CRLs to check for revocation.
+    pub crl_ders: Vec<Vec<u8>>,
+    /// Check CRL for the leaf certificate only (`crl_check`).
+    pub crl_check_leaf: bool,
+    /// Check CRL for all certificates in the chain (`crl_check_all`).
+    pub crl_check_all: bool,
 }
 
 impl Default for VerifyOptions {
@@ -97,6 +103,9 @@ impl Default for VerifyOptions {
             verify_depth: None,
             verify_email: None,
             verify_ip: None,
+            crl_ders: Vec::new(),
+            crl_check_leaf: false,
+            crl_check_all: false,
         }
     }
 }
@@ -166,9 +175,7 @@ impl TrustStore {
         let probe = openssl_probe::probe();
 
         // Build candidate list: env var first, then openssl-probe, then known paths
-        let mut bundle_paths: Vec<Option<String>> = vec![
-            std::env::var("SSL_CERT_FILE").ok(),
-        ];
+        let mut bundle_paths: Vec<Option<String>> = vec![std::env::var("SSL_CERT_FILE").ok()];
         if let Some(probe_file) = probe.cert_file {
             bundle_paths.push(Some(probe_file.to_string_lossy().into_owned()));
         }
@@ -179,40 +186,38 @@ impl TrustStore {
             Some("/etc/ssl/cert.pem".into()),
         ]);
 
-        for path_opt in &bundle_paths {
-            if let Some(path) = path_opt {
-                if let Ok(data) = std::fs::read(path) {
-                    let added = store.add_pem_bundle(&data)?;
-                    if added > 0 {
-                        return Ok(store);
-                    }
+        for path in bundle_paths.iter().flatten() {
+            if let Ok(data) = std::fs::read(path) {
+                let added = store.add_pem_bundle(&data)?;
+                if added > 0 {
+                    return Ok(store);
                 }
             }
         }
 
         // Try directory of individual certs
-        let mut dir_paths: Vec<Option<String>> = vec![
-            std::env::var("SSL_CERT_DIR").ok(),
-        ];
+        let mut dir_paths: Vec<Option<String>> = vec![std::env::var("SSL_CERT_DIR").ok()];
         if let Some(probe_dir) = probe.cert_dir {
             dir_paths.push(Some(probe_dir.to_string_lossy().into_owned()));
         }
         dir_paths.push(Some("/etc/ssl/certs".into()));
 
-        for dir_opt in &dir_paths {
-            if let Some(dir) = dir_opt {
-                if let Ok(entries) = std::fs::read_dir(dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().map(|e| e == "pem" || e == "crt").unwrap_or(false) {
-                            if let Ok(data) = std::fs::read(&path) {
-                                let _ = store.add_pem_bundle(&data);
-                            }
+        for dir in dir_paths.iter().flatten() {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path
+                        .extension()
+                        .map(|e| e == "pem" || e == "crt")
+                        .unwrap_or(false)
+                    {
+                        if let Ok(data) = std::fs::read(&path) {
+                            let _ = store.add_pem_bundle(&data);
                         }
                     }
-                    if !store.is_empty() {
-                        return Ok(store);
-                    }
+                }
+                if !store.is_empty() {
+                    return Ok(store);
                 }
             }
         }
@@ -246,8 +251,8 @@ impl TrustStore {
 
     /// Add a DER-encoded certificate to the trust store.
     pub fn add_der(&mut self, der: &[u8]) -> Result<(), XcertError> {
-        let (_, x509) = X509Certificate::from_der(der)
-            .map_err(|e| XcertError::DerError(format!("{}", e)))?;
+        let (_, x509) =
+            X509Certificate::from_der(der).map_err(|e| XcertError::DerError(format!("{}", e)))?;
 
         let subject_raw = x509.subject().as_raw().to_vec();
         self.certs_by_subject
@@ -279,7 +284,10 @@ impl TrustStore {
     pub fn add_pem_directory(&mut self, dir: &std::path::Path) -> Result<usize, XcertError> {
         let mut total = 0;
         let entries = std::fs::read_dir(dir).map_err(|e| {
-            XcertError::Io(std::io::Error::new(e.kind(), format!("{}: {}", dir.display(), e)))
+            XcertError::Io(std::io::Error::new(
+                e.kind(),
+                format!("{}: {}", dir.display(), e),
+            ))
         })?;
         for entry in entries {
             let entry = entry?;
@@ -355,10 +363,7 @@ pub fn parse_pem_chain(input: &[u8]) -> Result<Vec<Vec<u8>>, XcertError> {
                 if !certs.is_empty() {
                     break;
                 }
-                return Err(XcertError::PemError(format!(
-                    "failed to parse PEM: {}",
-                    e
-                )));
+                return Err(XcertError::PemError(format!("failed to parse PEM: {}", e)));
             }
         }
     }
@@ -398,6 +403,7 @@ pub fn verify_chain(
 ///
 /// Like [`verify_chain`], but accepts [`VerifyOptions`] to control behavior
 /// such as skipping validity date checks.
+#[allow(clippy::indexing_slicing)]
 pub fn verify_chain_with_options(
     chain_der: &[Vec<u8>],
     trust_store: &TrustStore,
@@ -434,7 +440,10 @@ pub fn verify_chain_with_options(
             X509Certificate::from_der(der)
                 .map(|(_, x509)| (der.as_slice(), x509))
                 .map_err(|e| {
-                    XcertError::VerifyError(format!("failed to parse certificate at depth {}: {}", i, e))
+                    XcertError::VerifyError(format!(
+                        "failed to parse certificate at depth {}: {}",
+                        i, e
+                    ))
                 })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -473,14 +482,10 @@ pub fn verify_chain_with_options(
     // Check basic constraints for CA certificates (all except leaf at depth 0)
     for (i, (_, x509)) in parsed.iter().enumerate().skip(1) {
         let subject = crate::parser::build_dn(x509.subject()).to_oneline();
-        let bc = x509
-            .basic_constraints()
-            .ok()
-            .flatten()
-            .map(|bc| bc.value);
+        let bc = x509.basic_constraints().ok().flatten().map(|bc| bc.value);
 
         match bc {
-            Some(ref constraints) => {
+            Some(constraints) => {
                 if !constraints.ca {
                     errors.push(format!(
                         "certificate at depth {} ({}) is not a CA but is used as issuer",
@@ -512,6 +517,23 @@ pub fn verify_chain_with_options(
                         i, subject
                     ));
                 }
+            }
+        }
+    }
+
+    // RFC 5280 Section 4.2.1.10: Check Name Constraints for CA certificates.
+    // Each CA with Name Constraints restricts the names in all certificates
+    // it issues (directly or transitively).
+    for (ca_depth, (_, ca_cert)) in parsed.iter().enumerate().skip(1) {
+        if let Ok(Some(nc_ext)) = ca_cert.name_constraints() {
+            let nc = &nc_ext.value;
+            // Check all certificates below this CA in the chain
+            for (child_depth, (_, child_cert)) in parsed.iter().enumerate() {
+                if child_depth >= ca_depth {
+                    break;
+                }
+                let nc_errors = check_name_constraints(nc, child_cert, child_depth, ca_depth);
+                errors.extend(nc_errors);
             }
         }
     }
@@ -551,6 +573,7 @@ pub fn verify_chain_with_options(
     // With partial_chain, any certificate in the chain that is directly in the
     // trust store satisfies the anchoring requirement.
     let mut trust_anchored = false;
+    let mut trusted_root_der: Option<Vec<u8>> = None;
 
     if options.partial_chain {
         for (der, _) in &parsed {
@@ -572,7 +595,9 @@ pub fn verify_chain_with_options(
 
         if is_self_signed {
             // The chain includes the root - check if it's in the trust store
-            if !trust_store.contains(last_der) {
+            if trust_store.contains(last_der) {
+                trusted_root_der = Some(last_der.to_vec());
+            } else {
                 errors.push(format!(
                     "root certificate ({}) is not in the trust store",
                     last_subject
@@ -595,6 +620,7 @@ pub fn verify_chain_with_options(
                                 subject: crate::parser::build_dn(root_x509.subject()).to_oneline(),
                                 issuer: crate::parser::build_dn(root_x509.issuer()).to_oneline(),
                             });
+                            trusted_root_der = Some(root_der.clone());
                             trust_anchored = true;
                             break;
                         }
@@ -607,6 +633,22 @@ pub fn verify_chain_with_options(
                     "unable to find trusted root for issuer: {}",
                     crate::parser::build_dn(last_x509.issuer()).to_oneline()
                 ));
+            }
+        }
+    }
+
+    // Check Name Constraints from the trusted root against the entire chain.
+    // This handles the case where the root is not in the chain itself but
+    // was found in the trust store.
+    if let Some(ref root_der) = trusted_root_der {
+        if let Ok((_, root_x509)) = X509Certificate::from_der(root_der) {
+            if let Ok(Some(nc_ext)) = root_x509.name_constraints() {
+                let nc = &nc_ext.value;
+                let root_depth = parsed.len(); // virtual depth of the trust store root
+                for (child_depth, (_, child_cert)) in parsed.iter().enumerate() {
+                    let nc_errors = check_name_constraints(nc, child_cert, child_depth, root_depth);
+                    errors.extend(nc_errors);
+                }
             }
         }
     }
@@ -667,10 +709,7 @@ pub fn verify_chain_with_options(
     if let Some(ref email) = options.verify_email {
         let (_, leaf) = &parsed[0];
         if !verify_email(leaf, email) {
-            errors.push(format!(
-                "email '{}' does not match certificate",
-                email
-            ));
+            errors.push(format!("email '{}' does not match certificate", email));
         }
     }
 
@@ -678,10 +717,35 @@ pub fn verify_chain_with_options(
     if let Some(ref ip) = options.verify_ip {
         let (_, leaf) = &parsed[0];
         if !verify_ip(leaf, ip) {
-            errors.push(format!(
-                "IP address '{}' does not match certificate",
-                ip
-            ));
+            errors.push(format!("IP address '{}' does not match certificate", ip));
+        }
+    }
+
+    // CRL-based revocation checking
+    if !options.crl_ders.is_empty() && (options.crl_check_leaf || options.crl_check_all) {
+        let check_range = if options.crl_check_all {
+            0..parsed.len()
+        } else {
+            // crl_check_leaf: only check the leaf (depth 0)
+            0..1
+        };
+
+        for i in check_range {
+            let (_, cert) = &parsed[i];
+            // Find the issuer for CRL signature verification
+            let issuer = if i + 1 < parsed.len() {
+                Some(&parsed[i + 1].1)
+            } else {
+                None
+            };
+
+            if let Some(reason) = check_crl_revocation(cert, &options.crl_ders, issuer) {
+                let subject = crate::parser::build_dn(cert.subject()).to_oneline();
+                errors.push(format!(
+                    "certificate at depth {} ({}) has been revoked (reason: {})",
+                    i, subject, reason
+                ));
+            }
         }
     }
 
@@ -719,6 +783,7 @@ pub fn verify_pem_chain_with_options(
 /// This mirrors `openssl verify -untrusted intermediates.pem cert.pem`:
 /// the leaf cert is provided separately, and intermediates are loaded from
 /// a PEM file to be prepended to the chain in issuer order.
+#[allow(clippy::indexing_slicing)]
 pub fn verify_with_untrusted(
     leaf_der: &[u8],
     untrusted_pem: &[u8],
@@ -893,3 +958,351 @@ fn verify_ip(cert: &X509Certificate, ip: &str) -> bool {
     false
 }
 
+// ---------------------------------------------------------------------------
+// Name Constraints checking (RFC 5280 Section 4.2.1.10)
+// ---------------------------------------------------------------------------
+
+/// Check that a certificate's names comply with a CA's Name Constraints.
+///
+/// Returns a list of error strings for any violations found.
+fn check_name_constraints(
+    nc: &x509_parser::extensions::NameConstraints,
+    cert: &X509Certificate,
+    child_depth: usize,
+    ca_depth: usize,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    let subject = crate::parser::build_dn(cert.subject()).to_oneline();
+
+    // Collect all names from the certificate's SAN extension
+    let mut dns_names: Vec<String> = Vec::new();
+    let mut email_names: Vec<String> = Vec::new();
+    let mut ip_addrs: Vec<Vec<u8>> = Vec::new();
+
+    if let Ok(Some(san)) = cert.subject_alternative_name() {
+        for gn in &san.value.general_names {
+            match gn {
+                GeneralName::DNSName(name) => {
+                    dns_names.push(name.to_ascii_lowercase());
+                }
+                GeneralName::RFC822Name(email) => {
+                    email_names.push(email.to_ascii_lowercase());
+                }
+                GeneralName::IPAddress(bytes) => {
+                    ip_addrs.push(bytes.to_vec());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Also check subject emailAddress (OID 1.2.840.113549.1.9.1)
+    for rdn in cert.subject().iter() {
+        for attr in rdn.iter() {
+            if format!("{}", attr.attr_type()) == "1.2.840.113549.1.9.1" {
+                if let Ok(val) = attr.as_str() {
+                    email_names.push(val.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+
+    // Check excluded subtrees first (any match is a violation)
+    if let Some(ref excluded) = nc.excluded_subtrees {
+        for subtree in excluded {
+            match &subtree.base {
+                GeneralName::DNSName(constraint) => {
+                    let c = constraint.to_ascii_lowercase();
+                    for name in &dns_names {
+                        if dns_name_matches_constraint(name, &c) {
+                            errors.push(format!(
+                                "certificate at depth {} ({}) DNS name '{}' \
+                                 violates excluded Name Constraint '{}' \
+                                 from CA at depth {}",
+                                child_depth, subject, name, constraint, ca_depth
+                            ));
+                        }
+                    }
+                }
+                GeneralName::RFC822Name(constraint) => {
+                    let c = constraint.to_ascii_lowercase();
+                    for email in &email_names {
+                        if email_matches_constraint(email, &c) {
+                            errors.push(format!(
+                                "certificate at depth {} ({}) email '{}' \
+                                 violates excluded Name Constraint '{}' \
+                                 from CA at depth {}",
+                                child_depth, subject, email, constraint, ca_depth
+                            ));
+                        }
+                    }
+                }
+                GeneralName::IPAddress(constraint_bytes) => {
+                    for ip_bytes in &ip_addrs {
+                        if ip_matches_constraint(ip_bytes, constraint_bytes) {
+                            let ip_str = crate::parser::format_ip_bytes(ip_bytes);
+                            errors.push(format!(
+                                "certificate at depth {} ({}) IP '{}' \
+                                 violates excluded Name Constraint from CA at depth {}",
+                                child_depth, subject, ip_str, ca_depth
+                            ));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Check permitted subtrees (if present, names of the matching type must
+    // fall within at least one permitted subtree)
+    if let Some(ref permitted) = nc.permitted_subtrees {
+        // Check DNS names: if any DNS constraint exists, all DNS names must match one
+        let dns_constraints: Vec<String> = permitted
+            .iter()
+            .filter_map(|s| match &s.base {
+                GeneralName::DNSName(c) => Some(c.to_ascii_lowercase()),
+                _ => None,
+            })
+            .collect();
+
+        if !dns_constraints.is_empty() {
+            for name in &dns_names {
+                let permitted_match = dns_constraints
+                    .iter()
+                    .any(|c| dns_name_matches_constraint(name, c));
+                if !permitted_match {
+                    errors.push(format!(
+                        "certificate at depth {} ({}) DNS name '{}' \
+                         is not within any permitted Name Constraint \
+                         from CA at depth {}",
+                        child_depth, subject, name, ca_depth
+                    ));
+                }
+            }
+        }
+
+        // Check email names
+        let email_constraints: Vec<String> = permitted
+            .iter()
+            .filter_map(|s| match &s.base {
+                GeneralName::RFC822Name(c) => Some(c.to_ascii_lowercase()),
+                _ => None,
+            })
+            .collect();
+
+        if !email_constraints.is_empty() {
+            for email in &email_names {
+                let permitted_match = email_constraints
+                    .iter()
+                    .any(|c| email_matches_constraint(email, c));
+                if !permitted_match {
+                    errors.push(format!(
+                        "certificate at depth {} ({}) email '{}' \
+                         is not within any permitted Name Constraint \
+                         from CA at depth {}",
+                        child_depth, subject, email, ca_depth
+                    ));
+                }
+            }
+        }
+
+        // Check IP addresses
+        let ip_constraints: Vec<&[u8]> = permitted
+            .iter()
+            .filter_map(|s| match &s.base {
+                GeneralName::IPAddress(bytes) => Some(*bytes),
+                _ => None,
+            })
+            .collect();
+
+        if !ip_constraints.is_empty() {
+            for ip_bytes in &ip_addrs {
+                let permitted_match = ip_constraints
+                    .iter()
+                    .any(|c| ip_matches_constraint(ip_bytes, c));
+                if !permitted_match {
+                    let ip_str = crate::parser::format_ip_bytes(ip_bytes);
+                    errors.push(format!(
+                        "certificate at depth {} ({}) IP '{}' \
+                         is not within any permitted Name Constraint \
+                         from CA at depth {}",
+                        child_depth, subject, ip_str, ca_depth
+                    ));
+                }
+            }
+        }
+    }
+
+    errors
+}
+
+/// Check if a DNS name matches a Name Constraint.
+///
+/// RFC 5280: A constraint of ".example.com" matches "host.example.com" but
+/// not "example.com". A constraint of "example.com" matches both
+/// "example.com" and "host.example.com".
+fn dns_name_matches_constraint(name: &str, constraint: &str) -> bool {
+    if constraint.is_empty() {
+        // Empty constraint matches everything
+        return true;
+    }
+    if constraint.starts_with('.') {
+        // ".example.com" matches any subdomain but not the domain itself
+        name.ends_with(constraint)
+    } else {
+        // "example.com" matches exact or any subdomain
+        name == constraint || name.ends_with(&format!(".{}", constraint))
+    }
+}
+
+/// Check if an email matches a Name Constraint.
+///
+/// RFC 5280: A constraint of "example.com" matches any email @example.com.
+/// A constraint of ".example.com" matches email at any subdomain.
+/// A specific email address is an exact match.
+fn email_matches_constraint(email: &str, constraint: &str) -> bool {
+    if constraint.is_empty() {
+        return true;
+    }
+    if constraint.contains('@') {
+        // Exact email match
+        email == constraint
+    } else if constraint.starts_with('.') {
+        // Domain constraint: matches subdomains
+        if let Some(pos) = email.find('@') {
+            let domain = &email[pos + 1..];
+            domain.ends_with(constraint)
+        } else {
+            false
+        }
+    } else {
+        // Domain constraint: matches the domain exactly
+        if let Some(pos) = email.find('@') {
+            let domain = &email[pos + 1..];
+            domain == constraint
+        } else {
+            false
+        }
+    }
+}
+
+/// Check if an IP address (as bytes from SAN) matches a constraint (IP + netmask).
+///
+/// IPv4 constraints are 8 bytes (4 address + 4 mask).
+/// IPv6 constraints are 32 bytes (16 address + 16 mask).
+#[allow(clippy::indexing_slicing)]
+fn ip_matches_constraint(ip_bytes: &[u8], constraint: &[u8]) -> bool {
+    if ip_bytes.len() == 4 && constraint.len() == 8 {
+        let ip: [u8; 4] = match ip_bytes.try_into() {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        let constraint: [u8; 8] = match constraint.try_into() {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        for i in 0..4 {
+            if (ip[i] & constraint[4 + i]) != (constraint[i] & constraint[4 + i]) {
+                return false;
+            }
+        }
+        true
+    } else if ip_bytes.len() == 16 && constraint.len() == 32 {
+        let ip: [u8; 16] = match ip_bytes.try_into() {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        let constraint: [u8; 32] = match constraint.try_into() {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        for i in 0..16 {
+            if (ip[i] & constraint[16 + i]) != (constraint[i] & constraint[16 + i]) {
+                return false;
+            }
+        }
+        true
+    } else {
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CRL-based revocation checking
+// ---------------------------------------------------------------------------
+
+/// Parse a PEM-encoded CRL file into DER-encoded CRL data.
+pub fn parse_pem_crl(input: &[u8]) -> Result<Vec<Vec<u8>>, XcertError> {
+    let mut crls = Vec::new();
+    for pem_result in Pem::iter_from_buffer(input) {
+        match pem_result {
+            Ok(pem) => {
+                if pem.label == "X509 CRL" {
+                    crls.push(pem.contents);
+                }
+            }
+            Err(e) => {
+                if !crls.is_empty() {
+                    break;
+                }
+                return Err(XcertError::PemError(format!(
+                    "failed to parse CRL PEM: {}",
+                    e
+                )));
+            }
+        }
+    }
+    if crls.is_empty() {
+        return Err(XcertError::PemError("no CRLs found in PEM input".into()));
+    }
+    Ok(crls)
+}
+
+/// Check whether a certificate has been revoked according to the given CRLs.
+///
+/// `cert_der` is the DER-encoded certificate to check.
+/// `crl_ders` is a slice of DER-encoded CRL data.
+/// `issuer_cert` is the issuer's certificate (used to verify the CRL signature).
+///
+/// Returns `Some(reason)` if revoked, `None` if not revoked.
+pub fn check_crl_revocation(
+    cert: &X509Certificate,
+    crl_ders: &[Vec<u8>],
+    issuer_cert: Option<&X509Certificate>,
+) -> Option<String> {
+    let serial = cert.raw_serial();
+
+    for crl_der in crl_ders {
+        let parsed = x509_parser::revocation_list::CertificateRevocationList::from_der(crl_der);
+        let (_, crl) = match parsed {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // Verify CRL is from the right issuer
+        if crl.issuer() != cert.issuer() {
+            continue;
+        }
+
+        // Optionally verify CRL signature against the issuer's public key
+        if let Some(issuer) = issuer_cert {
+            if crl.verify_signature(issuer.public_key()).is_err() {
+                continue;
+            }
+        }
+
+        // Check if the certificate's serial number is in the revoked list
+        for revoked in crl.iter_revoked_certificates() {
+            if revoked.raw_serial() == serial {
+                let reason = revoked
+                    .reason_code()
+                    .map(|rc| format!("{:?}", rc.1))
+                    .unwrap_or_else(|| "unspecified".to_string());
+                return Some(reason);
+            }
+        }
+    }
+
+    None
+}

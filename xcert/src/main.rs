@@ -126,6 +126,15 @@ enum Commands {
         /// Display information about the verified chain
         #[arg(long)]
         show_chain: bool,
+        /// PEM file containing CRL(s) for revocation checking
+        #[arg(long = "CRLfile", visible_alias = "crl-file", value_name = "FILE")]
+        crl_file: Option<PathBuf>,
+        /// Check CRL revocation for the leaf certificate
+        #[arg(long)]
+        crl_check: bool,
+        /// Check CRL revocation for all certificates in the chain
+        #[arg(long)]
+        crl_check_all: bool,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -217,9 +226,11 @@ fn main() -> Result<()> {
 
             // If --ext is provided, extract that extension by name
             if let Some(ext_name) = ext {
-                let matching: Vec<_> = cert.extensions.iter().filter(|e| {
-                    e.name.eq_ignore_ascii_case(ext_name) || e.oid == *ext_name
-                }).collect();
+                let matching: Vec<_> = cert
+                    .extensions
+                    .iter()
+                    .filter(|e| e.name.eq_ignore_ascii_case(ext_name) || e.oid == *ext_name)
+                    .collect();
                 if matching.is_empty() {
                     anyhow::bail!("Extension '{}' not found", ext_name);
                 }
@@ -227,10 +238,12 @@ fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&matching)?);
                 } else {
                     for e in matching {
-                        println!("{}{}: {:?}",
+                        println!(
+                            "{}{}: {:?}",
                             e.name,
                             if e.critical { " [critical]" } else { "" },
-                            e.value);
+                            e.value
+                        );
                     }
                 }
                 return Ok(());
@@ -277,10 +290,7 @@ fn main() -> Result<()> {
                     }
                 }
                 FieldName::OcspUrl => cert.ocsp_urls().join("\n"),
-                FieldName::KeyUsage => cert
-                    .key_usage()
-                    .map(|u| u.join(", "))
-                    .unwrap_or_default(),
+                FieldName::KeyUsage => cert.key_usage().map(|u| u.join(", ")).unwrap_or_default(),
                 FieldName::ExtKeyUsage => cert
                     .ext_key_usage()
                     .map(|u| u.join(", "))
@@ -394,6 +404,9 @@ fn main() -> Result<()> {
             attime,
             verify_depth,
             show_chain,
+            crl_file,
+            crl_check,
+            crl_check_all,
             json,
         } => {
             let input = read_input(file.as_ref())?;
@@ -407,6 +420,15 @@ fn main() -> Result<()> {
             if let Some(ca_dir) = ca_path {
                 trust_store.add_pem_directory(ca_dir)?;
             }
+
+            // Load CRL file if provided
+            let crl_ders = if let Some(crl_path) = crl_file {
+                let crl_data = std::fs::read(crl_path)
+                    .with_context(|| format!("Failed to read CRL file: {}", crl_path.display()))?;
+                xcert_lib::parse_pem_crl(&crl_data)?
+            } else {
+                Vec::new()
+            };
 
             // Resolve named purposes (sslserver, sslclient, etc.) to OIDs
             let resolved_purpose = purpose.as_ref().map(|p| {
@@ -423,13 +445,20 @@ fn main() -> Result<()> {
                 verify_depth: *verify_depth,
                 verify_email: verify_email.clone(),
                 verify_ip: verify_ip.clone(),
+                crl_ders,
+                crl_check_leaf: *crl_check || *crl_check_all,
+                crl_check_all: *crl_check_all,
             };
 
             let result = if let Some(untrusted_path) = untrusted {
                 // Separate leaf + untrusted intermediates (like openssl verify -untrusted)
                 let leaf_der = xcert_lib::pem_to_der(&input)?;
-                let untrusted_data = std::fs::read(untrusted_path)
-                    .with_context(|| format!("Failed to read untrusted file: {}", untrusted_path.display()))?;
+                let untrusted_data = std::fs::read(untrusted_path).with_context(|| {
+                    format!(
+                        "Failed to read untrusted file: {}",
+                        untrusted_path.display()
+                    )
+                })?;
                 xcert_lib::verify_with_untrusted(
                     &leaf_der,
                     &untrusted_data,
@@ -449,15 +478,22 @@ fn main() -> Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else if result.is_valid {
-                let label = file.as_ref().map_or("stdin".to_string(), |f| f.display().to_string());
+                let label = file
+                    .as_ref()
+                    .map_or("stdin".to_string(), |f| f.display().to_string());
                 println!("{}: {}", label, result);
                 if *show_chain {
                     for info in &result.chain {
-                        println!("depth {}: subject = {}, issuer = {}", info.depth, info.subject, info.issuer);
+                        println!(
+                            "depth {}: subject = {}, issuer = {}",
+                            info.depth, info.subject, info.issuer
+                        );
                     }
                 }
             } else {
-                let label = file.as_ref().map_or("stdin".to_string(), |f| f.display().to_string());
+                let label = file
+                    .as_ref()
+                    .map_or("stdin".to_string(), |f| f.display().to_string());
                 eprintln!("{}: {}", label, result);
             }
 
