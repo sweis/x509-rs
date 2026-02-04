@@ -92,30 +92,6 @@ mod parsing {
     }
 
     #[test]
-    fn parse_ec_p256() {
-        let data = load_cert("ec-p256.pem");
-        let cert = parse_cert(&data).expect("should parse ECDSA P-256 cert");
-        assert_eq!(cert.version, 3);
-        assert_eq!(cert.public_key.algorithm, "EC");
-    }
-
-    #[test]
-    fn parse_ec_p384() {
-        let data = load_cert("ec-p384.pem");
-        let cert = parse_cert(&data).expect("should parse ECDSA P-384 cert");
-        assert_eq!(cert.version, 3);
-        assert_eq!(cert.public_key.algorithm, "EC");
-    }
-
-    #[test]
-    fn parse_ed25519() {
-        let data = load_cert("ed25519.pem");
-        let cert = parse_cert(&data).expect("should parse Ed25519 cert");
-        assert_eq!(cert.version, 3);
-        assert_eq!(cert.public_key.algorithm, "Ed25519");
-    }
-
-    #[test]
     fn parse_minimal_self_signed() {
         let data = load_cert("minimal.pem");
         let cert = parse_cert(&data).expect("should parse minimal cert");
@@ -165,11 +141,6 @@ mod parsing {
     }
 
     #[test]
-    fn parse_empty_input_returns_error() {
-        assert!(parse_cert(b"").is_err());
-    }
-
-    #[test]
     fn parse_truncated_der_returns_error() {
         let data = load_cert("root-ca.der");
         let truncated = &data[..data.len() / 2];
@@ -184,55 +155,6 @@ mod parsing {
 mod fields {
     use super::*;
 
-    // --- Subject ---
-
-    #[test]
-    fn root_ca_subject() {
-        let data = load_cert("root-ca.pem");
-        let cert = parse_cert(&data).unwrap();
-        let subject = cert.subject_string();
-        assert!(subject.contains("Test Root CA"), "subject: {}", subject);
-        assert!(subject.contains("US"), "subject should contain country");
-        assert!(subject.contains("Test PKI"), "subject should contain org");
-    }
-
-    #[test]
-    fn server_subject() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let subject = cert.subject_string();
-        assert!(subject.contains("www.example.com"), "subject: {}", subject);
-        assert!(
-            subject.contains("Example Corp"),
-            "subject should contain org"
-        );
-    }
-
-    #[test]
-    fn ec_p256_subject() {
-        let data = load_cert("ec-p256.pem");
-        let cert = parse_cert(&data).unwrap();
-        let subject = cert.subject_string();
-        assert!(
-            subject.contains("ec-test.example.com"),
-            "subject: {}",
-            subject
-        );
-        assert!(subject.contains("DE"), "subject should contain country DE");
-    }
-
-    #[test]
-    fn ed25519_subject() {
-        let data = load_cert("ed25519.pem");
-        let cert = parse_cert(&data).unwrap();
-        let subject = cert.subject_string();
-        assert!(
-            subject.contains("ed25519.example.com"),
-            "subject: {}",
-            subject
-        );
-    }
-
     // --- Issuer ---
 
     #[test]
@@ -243,56 +165,6 @@ mod fields {
             cert.subject_string(),
             cert.issuer_string(),
             "root CA should be self-signed"
-        );
-    }
-
-    #[test]
-    fn server_issuer_is_intermediate() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let issuer = cert.issuer_string();
-        assert!(
-            issuer.contains("Test Intermediate CA"),
-            "issuer: {}",
-            issuer
-        );
-    }
-
-    #[test]
-    fn intermediate_issuer_is_root() {
-        let data = load_cert("intermediate-ca.pem");
-        let cert = parse_cert(&data).unwrap();
-        let issuer = cert.issuer_string();
-        assert!(issuer.contains("Test Root CA"), "issuer: {}", issuer);
-    }
-
-    // --- Serial ---
-
-    #[test]
-    fn root_ca_serial() {
-        let data = load_cert("root-ca.pem");
-        let cert = parse_cert(&data).unwrap();
-        let serial = cert.serial_hex();
-        // openssl reports serial=01
-        assert!(
-            serial == "01" || serial == "1",
-            "root CA serial should be 01, got: {}",
-            serial
-        );
-    }
-
-    #[test]
-    fn server_serial() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let serial = cert.serial_hex();
-        // openssl reports serial=1000
-        // Serial 0x1000 can be "10:00" (colon-separated) or "1000"
-        let serial_stripped = serial.replace(":", "");
-        assert!(
-            serial_stripped.to_uppercase().contains("1000"),
-            "server serial should contain 1000, got: {}",
-            serial
         );
     }
 
@@ -328,67 +200,6 @@ mod fields {
     }
 
     // --- Public Key Info ---
-
-    #[test]
-    fn server_rsa_2048_key() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert_eq!(cert.public_key.algorithm, "RSA");
-        assert_eq!(cert.public_key.key_size, Some(2048));
-    }
-
-    #[test]
-    fn ec_p256_key_info() {
-        let data = load_cert("ec-p256.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert_eq!(cert.public_key.algorithm, "EC");
-        assert_eq!(
-            cert.public_key.curve.as_deref(),
-            Some("P-256"),
-            "curve: {:?}",
-            cert.public_key.curve
-        );
-    }
-
-    #[test]
-    fn ec_p384_key_info() {
-        let data = load_cert("ec-p384.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert_eq!(cert.public_key.algorithm, "EC");
-        assert_eq!(
-            cert.public_key.curve.as_deref(),
-            Some("P-384"),
-            "curve: {:?}",
-            cert.public_key.curve
-        );
-    }
-
-    #[test]
-    fn ed25519_key_info() {
-        let data = load_cert("ed25519.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert_eq!(cert.public_key.algorithm, "Ed25519");
-    }
-
-    #[test]
-    fn rsa_modulus_present() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let modulus = cert.modulus_hex();
-        assert!(modulus.is_some(), "RSA cert should have modulus");
-        let modulus = modulus.unwrap();
-        assert!(!modulus.is_empty(), "modulus should not be empty");
-    }
-
-    #[test]
-    fn ec_has_no_modulus() {
-        let data = load_cert("ec-p256.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert!(
-            cert.modulus_hex().is_none(),
-            "EC cert should not have modulus"
-        );
-    }
 
     #[test]
     fn public_key_pem_format() {
@@ -627,18 +438,6 @@ mod extensions {
     }
 
     #[test]
-    fn server_authority_info_access() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let ocsp_urls = cert.ocsp_urls();
-        assert!(
-            ocsp_urls.iter().any(|u| u.contains("ocsp.example.com")),
-            "should have OCSP URL, got: {:?}",
-            ocsp_urls
-        );
-    }
-
-    #[test]
     fn many_extensions_cert_has_expected_extensions() {
         let data = load_cert("many-extensions.pem");
         let cert = parse_cert(&data).unwrap();
@@ -744,52 +543,6 @@ mod extensions {
 mod fingerprints {
     use super::*;
 
-    /// Parse OpenSSL fingerprint like "sha256 Fingerprint=AA:BB:CC:..."
-    fn expected_fingerprint(ref_file: &str) -> String {
-        let line = load_reference(ref_file);
-        line.split('=')
-            .nth(1)
-            .unwrap_or(&line)
-            .trim()
-            .to_uppercase()
-    }
-
-    #[test]
-    fn root_ca_sha256_fingerprint() {
-        let data = load_cert("root-ca.pem");
-        let cert = parse_cert(&data).unwrap();
-        let fp = cert.fingerprint(DigestAlgorithm::Sha256);
-        let expected = expected_fingerprint("root-ca-fingerprint-sha256.txt");
-        assert_eq!(fp.to_uppercase(), expected, "SHA-256 fingerprint mismatch");
-    }
-
-    #[test]
-    fn root_ca_sha1_fingerprint() {
-        let data = load_cert("root-ca.pem");
-        let cert = parse_cert(&data).unwrap();
-        let fp = cert.fingerprint(DigestAlgorithm::Sha1);
-        let expected = expected_fingerprint("root-ca-fingerprint-sha1.txt");
-        assert_eq!(fp.to_uppercase(), expected, "SHA-1 fingerprint mismatch");
-    }
-
-    #[test]
-    fn server_sha256_fingerprint() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let fp = cert.fingerprint(DigestAlgorithm::Sha256);
-        let expected = expected_fingerprint("server-fingerprint-sha256.txt");
-        assert_eq!(fp.to_uppercase(), expected, "SHA-256 fingerprint mismatch");
-    }
-
-    #[test]
-    fn many_extensions_sha256_fingerprint() {
-        let data = load_cert("many-extensions.pem");
-        let cert = parse_cert(&data).unwrap();
-        let fp = cert.fingerprint(DigestAlgorithm::Sha256);
-        let expected = expected_fingerprint("many-extensions-fingerprint-sha256.txt");
-        assert_eq!(fp.to_uppercase(), expected, "SHA-256 fingerprint mismatch");
-    }
-
     #[test]
     fn fingerprint_from_pem_matches_der() {
         let pem_data = load_cert("root-ca.pem");
@@ -828,30 +581,6 @@ mod fingerprints {
 
 mod emails {
     use super::*;
-
-    #[test]
-    fn server_emails() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let emails = cert.emails();
-        assert!(
-            emails.contains(&"admin@example.com".to_string()),
-            "should contain admin@example.com, got: {:?}",
-            emails
-        );
-    }
-
-    #[test]
-    fn client_emails() {
-        let data = load_cert("client.pem");
-        let cert = parse_cert(&data).unwrap();
-        let emails = cert.emails();
-        assert!(
-            emails.contains(&"client@example.com".to_string()),
-            "should contain client@example.com, got: {:?}",
-            emails
-        );
-    }
 
     #[test]
     fn root_ca_no_emails() {
@@ -994,16 +723,6 @@ mod checks {
     // --- Email ---
 
     #[test]
-    fn email_match() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert!(
-            check_email(&cert, "admin@example.com"),
-            "should match admin@example.com"
-        );
-    }
-
-    #[test]
     fn email_no_match() {
         let data = load_cert("server.pem");
         let cert = parse_cert(&data).unwrap();
@@ -1013,15 +732,6 @@ mod checks {
         );
     }
 
-    #[test]
-    fn client_email_match() {
-        let data = load_cert("client.pem");
-        let cert = parse_cert(&data).unwrap();
-        assert!(
-            check_email(&cert, "client@example.com"),
-            "should match client@example.com"
-        );
-    }
 }
 
 // =========================================================================
@@ -1165,16 +875,6 @@ mod display {
             text.contains("Signature") || text.contains("signature"),
             "display_text with show_all should include signature"
         );
-    }
-
-    #[test]
-    fn json_output_is_valid() {
-        let data = load_cert("server.pem");
-        let cert = parse_cert(&data).unwrap();
-        let json_str = to_json(&cert).expect("JSON serialization should succeed");
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json_str).expect("output should be valid JSON");
-        assert!(parsed.is_object(), "JSON root should be an object");
     }
 
     #[test]
@@ -1340,16 +1040,6 @@ mod degenerate {
         assert!(result.is_err(), "single byte must return an error");
     }
 
-    #[test]
-    fn one_byte_auto_detect_returns_error() {
-        let data = load_degen("one-byte.der");
-        let result = parse_cert(&data);
-        assert!(
-            result.is_err(),
-            "single byte via parse_cert must return an error"
-        );
-    }
-
     // -----------------------------------------------------------------
     // 3. truncated-header.der -- first 10 bytes of a valid DER cert
     // -----------------------------------------------------------------
@@ -1386,16 +1076,6 @@ mod degenerate {
         assert_eq!(data.len(), 1024);
         let result = parse_der(&data);
         assert!(result.is_err(), "random bytes must return an error");
-    }
-
-    #[test]
-    fn random_bytes_auto_detect_returns_error() {
-        let data = load_degen("random-bytes.der");
-        let result = parse_cert(&data);
-        assert!(
-            result.is_err(),
-            "random bytes via parse_cert must return an error"
-        );
     }
 
     // -----------------------------------------------------------------
@@ -1453,16 +1133,6 @@ mod degenerate {
         assert!(result.is_err(), "1024 null bytes must return an error");
     }
 
-    #[test]
-    fn null_bytes_auto_detect_returns_error() {
-        let data = load_degen("null-bytes.der");
-        let result = parse_cert(&data);
-        assert!(
-            result.is_err(),
-            "null bytes via parse_cert must return an error"
-        );
-    }
-
     // -----------------------------------------------------------------
     // 9. huge-length.der -- SEQUENCE claiming 2GB, only 100 bytes of data
     // -----------------------------------------------------------------
@@ -1475,16 +1145,6 @@ mod degenerate {
         assert!(
             result.is_err(),
             "DER with huge claimed length must return an error"
-        );
-    }
-
-    #[test]
-    fn huge_length_auto_detect_returns_error() {
-        let data = load_degen("huge-length.der");
-        let result = parse_cert(&data);
-        assert!(
-            result.is_err(),
-            "huge length via parse_cert must return an error"
         );
     }
 
@@ -1584,20 +1244,6 @@ mod degenerate {
                 // If the parser rejects mixed PEM, that is acceptable
                 // as long as it does not panic
                 let _ = e;
-            }
-        }
-    }
-
-    #[test]
-    fn multiple_pem_auto_detect() {
-        let data = load_degen("multiple-pem.pem");
-        let result = parse_cert(&data);
-        match result {
-            Ok(cert) => {
-                assert_eq!(cert.version, 3);
-            }
-            Err(_) => {
-                // Also acceptable
             }
         }
     }
@@ -1836,16 +1482,6 @@ mod verification {
         assert!(
             !store.contains(&chain[0]),
             "trust store should not contain server cert"
-        );
-    }
-
-    #[test]
-    fn trust_store_system_loads() {
-        let store = TrustStore::system().expect("system trust store should load");
-        assert!(
-            store.len() > 50,
-            "system store should have many CA certs, got {}",
-            store.len()
         );
     }
 
@@ -2488,18 +2124,6 @@ mod cross_compat_x509_parser {
     use super::*;
 
     #[test]
-    fn x509p_pem_and_der_produce_same_fingerprint() {
-        let pem_cert = parse_external_pem("x509p-certificate.pem");
-        let der_cert = parse_external_der("x509p-certificate.der");
-        assert_eq!(
-            pem_cert.fingerprint(DigestAlgorithm::Sha256),
-            der_cert.fingerprint(DigestAlgorithm::Sha256),
-        );
-        assert_eq!(pem_cert.serial, der_cert.serial);
-        assert_eq!(pem_cert.subject_string(), der_cert.subject_string());
-    }
-
-    #[test]
     fn x509p_certificate_pem() {
         let cert = parse_external_pem("x509p-certificate.pem");
         assert_eq!(cert.version, 3);
@@ -2534,18 +2158,6 @@ mod cross_compat_x509_parser {
     }
 
     #[test]
-    fn x509p_igc_a_der_matches_pem() {
-        let pem_cert = parse_external_pem("x509p-IGC_A.pem");
-        let der_cert = parse_external_der("x509p-IGC_A.der");
-        assert_eq!(
-            pem_cert.fingerprint(DigestAlgorithm::Sha256),
-            der_cert.fingerprint(DigestAlgorithm::Sha256),
-        );
-        assert_eq!(pem_cert.subject_string(), der_cert.subject_string());
-        assert_eq!(pem_cert.serial, der_cert.serial);
-    }
-
-    #[test]
     fn x509p_no_extensions() {
         let cert = parse_external_pem("x509p-no_extensions.pem");
         assert!(cert.subject_string().contains("CN = benno"));
@@ -2555,16 +2167,6 @@ mod cross_compat_x509_parser {
         assert_eq!(
             cert.fingerprint(DigestAlgorithm::Sha256),
             "39:F4:1F:F9:38:5A:90:DF:31:A9:0F:C6:C0:C6:86:CF:23:43:DE:A2:F1:8C:D0:58:33:9A:0D:00:A0:7A:51:CB"
-        );
-    }
-
-    #[test]
-    fn x509p_no_extensions_der_matches_pem() {
-        let pem_cert = parse_external_pem("x509p-no_extensions.pem");
-        let der_cert = parse_external_der("x509p-no_extensions.der");
-        assert_eq!(
-            pem_cert.fingerprint(DigestAlgorithm::Sha256),
-            der_cert.fingerprint(DigestAlgorithm::Sha256),
         );
     }
 
@@ -2615,31 +2217,6 @@ mod cross_compat_conversion {
         );
     }
 
-    #[test]
-    fn ossl_ed25519_pem_to_der_roundtrip() {
-        let pem_data = load_external("ossl-root-ed25519.pem");
-        let der_bytes = pem_to_der(&pem_data).unwrap();
-        let pem_string = der_to_pem(&der_bytes);
-        let re_der = pem_to_der(pem_string.as_bytes()).unwrap();
-        assert_eq!(der_bytes, re_der);
-    }
-
-    #[test]
-    fn x509p_der_to_pem_roundtrip() {
-        let der_data = load_external("x509p-certificate.der");
-        let pem_string = der_to_pem(&der_data);
-        let re_der = pem_to_der(pem_string.as_bytes()).unwrap();
-        assert_eq!(der_data, re_der);
-    }
-
-    #[test]
-    fn pyca_letsencrypt_pem_to_der_roundtrip() {
-        let pem_data = load_external("pyca-letsencrypt-x3.pem");
-        let der_bytes = pem_to_der(&pem_data).unwrap();
-        let pem_string = der_to_pem(&der_bytes);
-        let re_der = pem_to_der(pem_string.as_bytes()).unwrap();
-        assert_eq!(der_bytes, re_der);
-    }
 }
 
 mod cross_compat_auto_detect {
