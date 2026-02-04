@@ -1,3 +1,6 @@
 [submodule "testdata/zlint"]
 	path = testdata/zlint
 	url = https://github.com/zmap/zlint.git
+[submodule "tests/x509-limbo"]
+	path = tests/x509-limbo
+	url = https://github.com/C2SP/x509-limbo
