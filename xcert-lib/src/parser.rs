@@ -6,7 +6,6 @@ use crate::fields::{
 };
 use crate::util;
 use crate::XcertError;
-use x509_parser::der_parser::asn1_rs;
 use x509_parser::prelude::*;
 
 /// Parse a certificate from PEM or DER (auto-detected).
@@ -123,11 +122,11 @@ fn format_sig_algorithm(algo: &AlgorithmIdentifier) -> String {
     }
 }
 
-fn build_dn(name: &X509Name) -> DistinguishedName {
+pub(crate) fn build_dn(name: &X509Name) -> DistinguishedName {
     let mut components = Vec::new();
     for rdn in name.iter() {
         for attr in rdn.iter() {
-            let key = oid_to_short_name(attr.attr_type());
+            let key = util::oid_short_name(&format!("{}", attr.attr_type()));
             let value = attr.as_str().unwrap_or("<binary>").to_string();
             components.push((key, value));
         }
@@ -135,63 +134,24 @@ fn build_dn(name: &X509Name) -> DistinguishedName {
     DistinguishedName { components }
 }
 
-fn oid_to_short_name(oid: &asn1_rs::Oid) -> String {
-    let oid_str = format!("{}", oid);
-    match oid_str.as_str() {
-        "2.5.4.3" => "CN".into(),
-        "2.5.4.4" => "SN".into(),
-        "2.5.4.5" => "serialNumber".into(),
-        "2.5.4.6" => "C".into(),
-        "2.5.4.7" => "L".into(),
-        "2.5.4.8" => "ST".into(),
-        "2.5.4.9" => "street".into(),
-        "2.5.4.10" => "O".into(),
-        "2.5.4.11" => "OU".into(),
-        "2.5.4.12" => "title".into(),
-        "2.5.4.17" => "postalCode".into(),
-        "2.5.4.42" => "GN".into(),
-        "1.2.840.113549.1.9.1" => "emailAddress".into(),
-        "0.9.2342.19200300.100.1.25" => "DC".into(),
-        other => other.to_string(),
-    }
-}
-
-fn build_datetime(time: &ASN1Time) -> DateTime {
-    let ts = time.timestamp();
-    let iso = format_timestamp_iso8601(ts);
+fn build_datetime(asn1_time: &ASN1Time) -> DateTime {
+    let ts = asn1_time.timestamp();
+    let iso = match ::time::OffsetDateTime::from_unix_timestamp(ts) {
+        Ok(dt) => format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+            dt.year(),
+            u8::from(dt.month()),
+            dt.day(),
+            dt.hour(),
+            dt.minute(),
+            dt.second()
+        ),
+        Err(_) => format!("{}", ts),
+    };
     DateTime {
         iso8601: iso,
         timestamp: ts,
     }
-}
-
-fn format_timestamp_iso8601(ts: i64) -> String {
-    const SECONDS_PER_DAY: i64 = 86400;
-    const DAYS_PER_400Y: i64 = 146097;
-
-    let days = ts.div_euclid(SECONDS_PER_DAY);
-    let rem = ts.rem_euclid(SECONDS_PER_DAY);
-
-    let hour = rem / 3600;
-    let min = (rem % 3600) / 60;
-    let sec = rem % 60;
-
-    // Civil date from day count (algorithm from Howard Hinnant)
-    let z = days + 719468;
-    let era = z.div_euclid(DAYS_PER_400Y);
-    let doe = z.rem_euclid(DAYS_PER_400Y);
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        y, m, d, hour, min, sec
-    )
 }
 
 fn build_public_key_info(
@@ -267,43 +227,35 @@ fn extract_ec_curve(algo: &AlgorithmIdentifier) -> String {
 }
 
 fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> String {
-    use asn1_rs::ToDer;
+    use x509_parser::der_parser::asn1_rs::ToDer;
 
-    // Encode AlgorithmIdentifier SEQUENCE from its fields.
-    // Using ToDer on the OID and parameters ensures correct TLV encoding,
-    // including proper tag+length on parameters (fixing a prior bug where
-    // only the value bytes were emitted).
+    // Encode individual components using asn1-rs ToDer for correct TLV encoding.
     let oid_der = spki.algorithm.algorithm.to_der_vec().unwrap_or_default();
     let params_der = match &spki.algorithm.parameters {
         Some(any) => any.to_der_vec().unwrap_or_else(|_| vec![0x05, 0x00]),
         None => vec![0x05, 0x00], // explicit NULL
     };
-    let algo_body_len = oid_der.len() + params_der.len();
 
     let key_data = &spki.subject_public_key.data;
-    let bitstring_content_len = 1 + key_data.len(); // 0x00 unused-bits + key
 
-    // AlgorithmIdentifier SEQUENCE length
-    let algo_total_len = 1 + der_length_size(algo_body_len) + algo_body_len;
-    // BIT STRING total length
-    let bitstring_total_len = 1 + der_length_size(bitstring_content_len) + bitstring_content_len;
-    // Outer SEQUENCE body
-    let spki_body_len = algo_total_len + bitstring_total_len;
+    // Build AlgorithmIdentifier SEQUENCE content
+    let mut algo_content = Vec::new();
+    algo_content.extend_from_slice(&oid_der);
+    algo_content.extend_from_slice(&params_der);
 
-    let mut spki_der = Vec::with_capacity(1 + der_length_size(spki_body_len) + spki_body_len);
-    // Outer SEQUENCE
-    spki_der.push(0x30);
-    push_der_length(&mut spki_der, spki_body_len);
-    // AlgorithmIdentifier SEQUENCE
-    spki_der.push(0x30);
-    push_der_length(&mut spki_der, algo_body_len);
-    spki_der.extend_from_slice(&oid_der);
-    spki_der.extend_from_slice(&params_der);
-    // BIT STRING
-    spki_der.push(0x03);
-    push_der_length(&mut spki_der, bitstring_content_len);
-    spki_der.push(0x00); // unused bits
-    spki_der.extend_from_slice(key_data);
+    // Build BIT STRING content (unused-bits byte + key data)
+    let mut bitstring_content = Vec::with_capacity(1 + key_data.len());
+    bitstring_content.push(0x00); // unused bits
+    bitstring_content.extend_from_slice(key_data);
+
+    // Wrap each in its TLV envelope, then wrap in outer SEQUENCE
+    let algo_seq = der_wrap(0x30, &algo_content);
+    let bitstring = der_wrap(0x03, &bitstring_content);
+
+    let mut outer_content = Vec::new();
+    outer_content.extend_from_slice(&algo_seq);
+    outer_content.extend_from_slice(&bitstring);
+    let spki_der = der_wrap(0x30, &outer_content);
 
     format!(
         "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
@@ -311,14 +263,11 @@ fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> String {
     )
 }
 
-fn der_length_size(len: usize) -> usize {
-    if len < 0x80 { 1 }
-    else if len < 0x100 { 2 }
-    else if len < 0x10000 { 3 }
-    else { 4 }
-}
-
-fn push_der_length(buf: &mut Vec<u8>, len: usize) {
+/// Wrap content bytes in a DER tag-length-value envelope.
+fn der_wrap(tag: u8, content: &[u8]) -> Vec<u8> {
+    let len = content.len();
+    let mut buf = Vec::with_capacity(1 + 4 + len);
+    buf.push(tag);
     if len < 0x80 {
         buf.push(len as u8);
     } else if len < 0x100 {
@@ -334,6 +283,8 @@ fn push_der_length(buf: &mut Vec<u8>, len: usize) {
         buf.push((len >> 8) as u8);
         buf.push(len as u8);
     }
+    buf.extend_from_slice(content);
+    buf
 }
 
 fn build_extensions(
@@ -553,14 +504,10 @@ fn format_general_name(gn: &GeneralName) -> String {
 }
 
 fn format_ip_bytes(bytes: &[u8]) -> String {
-    if let [a, b, c, d] = *bytes {
-        format!("{}.{}.{}.{}", a, b, c, d)
-    } else if bytes.len() == 16 {
-        bytes
-            .chunks_exact(2)
-            .filter_map(|c| Some(format!("{:x}", (*c.first()? as u16) << 8 | *c.get(1)? as u16)))
-            .collect::<Vec<_>>()
-            .join(":")
+    if let Ok(octets) = <[u8; 4]>::try_from(bytes) {
+        std::net::Ipv4Addr::from(octets).to_string()
+    } else if let Ok(octets) = <[u8; 16]>::try_from(bytes) {
+        std::net::Ipv6Addr::from(octets).to_string()
     } else {
         hex::encode(bytes)
     }

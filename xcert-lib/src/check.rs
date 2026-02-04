@@ -1,6 +1,7 @@
 //! Certificate validity checks: expiry, hostname, email, IP matching.
 
 use crate::fields::{CertificateInfo, SanEntry};
+use crate::util;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Check if the certificate expires within `seconds` from now.
@@ -44,12 +45,12 @@ pub fn check_host(cert: &CertificateInfo, hostname: &str) -> bool {
     if !san_dns.is_empty() {
         return san_dns
             .iter()
-            .any(|pattern| hostname_matches(pattern, &hostname_lower));
+            .any(|pattern| util::hostname_matches(pattern, &hostname_lower));
     }
 
     // Fall back to CN if no SAN DNS entries
     for (key, value) in &cert.subject.components {
-        if key == "CN" && hostname_matches(value, &hostname_lower) {
+        if key == "CN" && util::hostname_matches(value, &hostname_lower) {
             return true;
         }
     }
@@ -82,28 +83,6 @@ pub fn check_ip(cert: &CertificateInfo, ip: &str) -> bool {
         if let SanEntry::Ip(san_ip) = entry {
             if normalize_ip(san_ip) == normalized {
                 return true;
-            }
-        }
-    }
-
-    false
-}
-
-fn hostname_matches(pattern: &str, hostname: &str) -> bool {
-    let pattern_lower = pattern.to_ascii_lowercase();
-
-    if pattern_lower == *hostname {
-        return true;
-    }
-
-    // Wildcard matching: *.example.com
-    if let Some(suffix) = pattern_lower.strip_prefix("*.") {
-        if let Some(rest) = hostname.strip_suffix(suffix) {
-            // rest should be "label." (a single label followed by a dot)
-            if let Some(label) = rest.strip_suffix('.') {
-                if !label.is_empty() && !label.contains('.') {
-                    return true;
-                }
             }
         }
     }

@@ -771,6 +771,7 @@ dependencies = [
  "sha1",
  "sha2",
  "thiserror 2.0.18",
+ "time",
  "x509-parser",
 ]
 

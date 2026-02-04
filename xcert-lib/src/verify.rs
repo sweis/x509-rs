@@ -7,6 +7,7 @@
 //! The system trust store location is discovered via `openssl-probe` and
 //! environment variables, matching OpenSSL's lookup behavior.
 
+use crate::util;
 use crate::XcertError;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -367,8 +368,8 @@ pub fn verify_chain_with_options(
     for (i, (_, x509)) in parsed.iter().enumerate() {
         chain_info.push(ChainCertInfo {
             depth: i,
-            subject: format_x509_name(x509.subject()),
-            issuer: format_x509_name(x509.issuer()),
+            subject: crate::parser::build_dn(x509.subject()).to_oneline(),
+            issuer: crate::parser::build_dn(x509.issuer()).to_oneline(),
         });
     }
 
@@ -377,7 +378,7 @@ pub fn verify_chain_with_options(
         for (i, (_, x509)) in parsed.iter().enumerate() {
             let not_before = x509.validity().not_before.timestamp();
             let not_after = x509.validity().not_after.timestamp();
-            let subject = format_x509_name(x509.subject());
+            let subject = crate::parser::build_dn(x509.subject()).to_oneline();
 
             if now_ts < not_before {
                 errors.push(format!(
@@ -396,7 +397,7 @@ pub fn verify_chain_with_options(
 
     // Check basic constraints for CA certificates (all except leaf at depth 0)
     for (i, (_, x509)) in parsed.iter().enumerate().skip(1) {
-        let subject = format_x509_name(x509.subject());
+        let subject = crate::parser::build_dn(x509.subject()).to_oneline();
         let bc = x509
             .basic_constraints()
             .ok()
@@ -450,8 +451,8 @@ pub fn verify_chain_with_options(
             errors.push(format!(
                 "signature verification failed at depth {} ({} -> {}): {}",
                 i,
-                format_x509_name(child.subject()),
-                format_x509_name(parent.subject()),
+                crate::parser::build_dn(child.subject()).to_oneline(),
+                crate::parser::build_dn(parent.subject()).to_oneline(),
                 e
             ));
         }
@@ -460,7 +461,7 @@ pub fn verify_chain_with_options(
     // Verify trust anchoring
     let last = &parsed[parsed.len() - 1];
     let (last_der, last_x509) = last;
-    let last_subject = format_x509_name(last_x509.subject());
+    let last_subject = crate::parser::build_dn(last_x509.subject()).to_oneline();
 
     // Check if the last cert in the chain is self-signed (i.e., it's a root)
     let is_self_signed = last_x509.subject().as_raw() == last_x509.issuer().as_raw()
@@ -489,8 +490,8 @@ pub fn verify_chain_with_options(
                         // Add the trusted root to the chain info
                         chain_info.push(ChainCertInfo {
                             depth: parsed.len(),
-                            subject: format_x509_name(root_x509.subject()),
-                            issuer: format_x509_name(root_x509.issuer()),
+                            subject: crate::parser::build_dn(root_x509.subject()).to_oneline(),
+                            issuer: crate::parser::build_dn(root_x509.issuer()).to_oneline(),
                         });
                         found_trusted_root = true;
                         break;
@@ -502,7 +503,7 @@ pub fn verify_chain_with_options(
         if !found_trusted_root {
             errors.push(format!(
                 "unable to find trusted root for issuer: {}",
-                format_x509_name(last_x509.issuer())
+                crate::parser::build_dn(last_x509.issuer()).to_oneline()
             ));
         }
     }
@@ -649,12 +650,12 @@ fn verify_hostname(cert: &X509Certificate, hostname: &str) -> bool {
     if !san_dns.is_empty() {
         return san_dns
             .iter()
-            .any(|pattern| hostname_matches(pattern, &hostname_lower));
+            .any(|pattern| util::hostname_matches(pattern, &hostname_lower));
     }
 
     // Fall back to CN
     if let Some(cn) = extract_cn(cert) {
-        return hostname_matches(&cn, &hostname_lower);
+        return util::hostname_matches(&cn, &hostname_lower);
     }
 
     false
@@ -686,53 +687,3 @@ fn extract_cn(cert: &X509Certificate) -> Option<String> {
     None
 }
 
-/// RFC 6125 hostname matching with wildcard support.
-fn hostname_matches(pattern: &str, hostname: &str) -> bool {
-    let pattern_lower = pattern.to_ascii_lowercase();
-
-    if pattern_lower == *hostname {
-        return true;
-    }
-
-    if let Some(suffix) = pattern_lower.strip_prefix("*.") {
-        if let Some(rest) = hostname.strip_suffix(suffix) {
-            if let Some(label) = rest.strip_suffix('.') {
-                if !label.is_empty() && !label.contains('.') {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
-/// Format an X509Name as a comma-separated one-line string.
-fn format_x509_name(name: &X509Name) -> String {
-    let mut parts = Vec::new();
-    for rdn in name.iter() {
-        for attr in rdn.iter() {
-            let oid_str = format!("{}", attr.attr_type());
-            let key = oid_short_name(&oid_str);
-            let value = attr.as_str().unwrap_or("<binary>");
-            parts.push(format!("{}={}", key, value));
-        }
-    }
-    parts.join(", ")
-}
-
-fn oid_short_name(oid: &str) -> String {
-    match oid {
-        "2.5.4.3" => "CN".into(),
-        "2.5.4.4" => "SN".into(),
-        "2.5.4.5" => "serialNumber".into(),
-        "2.5.4.6" => "C".into(),
-        "2.5.4.7" => "L".into(),
-        "2.5.4.8" => "ST".into(),
-        "2.5.4.10" => "O".into(),
-        "2.5.4.11" => "OU".into(),
-        "1.2.840.113549.1.9.1" => "emailAddress".into(),
-        "0.9.2342.19200300.100.1.25" => "DC".into(),
-        other => other.to_string(),
-    }
-}

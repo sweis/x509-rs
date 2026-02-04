@@ -15,6 +15,7 @@ hex = "0.4"
 digest = "0.10"
 base64 = "0.22"
 openssl-probe = "0.1"
+time = "0.3"
 
 [lints]
 workspace = true
