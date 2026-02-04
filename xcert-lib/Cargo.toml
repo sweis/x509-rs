@@ -14,6 +14,7 @@ thiserror = "2"
 hex = "0.4"
 digest = "0.10"
 base64 = "0.22"
+openssl-probe = "0.1"
 
 [lints]
 workspace = true

@@ -11,6 +11,7 @@ mod fields;
 mod fingerprint;
 mod parser;
 mod util;
+pub mod verify;
 
 pub use check::{check_email, check_expiry, check_host, check_ip};
 pub use convert::{der_to_pem, pem_to_der};
@@ -22,8 +23,9 @@ pub use fields::{
 pub use fingerprint::compute_fingerprint;
 pub use parser::{parse_cert, parse_der, parse_pem};
 pub use verify::{
-    parse_pem_chain, verify_chain, verify_pem_chain, ChainCertInfo, TrustStore,
-    VerificationResult,
+    find_system_ca_bundle, parse_pem_chain, verify_chain, verify_chain_with_options,
+    verify_pem_chain, verify_pem_chain_with_options, verify_with_untrusted, ChainCertInfo,
+    TrustStore, VerificationResult, VerifyOptions,
 };
 
 /// Errors returned by xcert-lib.
