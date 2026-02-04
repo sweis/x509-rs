@@ -52,9 +52,10 @@ cargo install --path xcert
 cargo test
 ```
 
-There are 155 integration tests covering parsing, field extraction, extensions,
+There are 201 integration tests covering parsing, field extraction, extensions,
 fingerprints, checks, conversion, display, degenerate/malformed inputs,
-certificate chain verification, cross-compatibility with external test vectors,
+certificate chain verification, verify options (email, IP, time, purpose,
+depth, partial chain), cross-compatibility with external test vectors,
 and OpenSSL output format compatibility.
 
 ## Usage
