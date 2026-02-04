@@ -739,16 +739,25 @@ pub fn verify_chain_with_options(
             0..1
         };
 
+        // Pre-parse trusted root for CRL signature verification when
+        // the root is not in the provided chain but was found in the trust store
+        let trusted_root_parsed = trusted_root_der
+            .as_deref()
+            .and_then(|der| X509Certificate::from_der(der).ok().map(|(_, c)| c));
+
         for i in check_range {
             let (_, cert) = &parsed[i];
             // Find the issuer for CRL signature verification
             let issuer = if i + 1 < parsed.len() {
                 Some(&parsed[i + 1].1)
+            } else if let Some(ref root) = trusted_root_parsed {
+                Some(root)
             } else {
-                None
+                // Self-signed root: use itself as CRL issuer
+                Some(cert)
             };
 
-            if let Some(reason) = check_crl_revocation(cert, &options.crl_ders, issuer) {
+            if let Some(reason) = check_crl_revocation(cert, &options.crl_ders, issuer, now_ts) {
                 let subject = crate::parser::build_dn(cert.subject()).to_oneline();
                 errors.push(format!(
                     "certificate at depth {} ({}) has been revoked (reason: {})",
@@ -1162,8 +1171,11 @@ fn dns_name_matches_constraint(name: &str, constraint: &str) -> bool {
         // ".example.com" matches any subdomain but not the domain itself
         name.ends_with(constraint)
     } else {
-        // "example.com" matches exact or any subdomain
-        name == constraint || name.ends_with(&format!(".{}", constraint))
+        // "example.com" matches exact or any subdomain (avoid format! allocation)
+        name == constraint
+            || (name.len() > constraint.len()
+                && name.ends_with(constraint)
+                && name.as_bytes().get(name.len() - constraint.len() - 1) == Some(&b'.'))
     }
 }
 
@@ -1202,41 +1214,18 @@ fn email_matches_constraint(email: &str, constraint: &str) -> bool {
 ///
 /// IPv4 constraints are 8 bytes (4 address + 4 mask).
 /// IPv6 constraints are 32 bytes (16 address + 16 mask).
-#[allow(clippy::indexing_slicing)]
 fn ip_matches_constraint(ip_bytes: &[u8], constraint: &[u8]) -> bool {
-    if ip_bytes.len() == 4 && constraint.len() == 8 {
-        let ip: [u8; 4] = match ip_bytes.try_into() {
-            Ok(a) => a,
-            Err(_) => return false,
-        };
-        let constraint: [u8; 8] = match constraint.try_into() {
-            Ok(a) => a,
-            Err(_) => return false,
-        };
-        for i in 0..4 {
-            if (ip[i] & constraint[4 + i]) != (constraint[i] & constraint[4 + i]) {
-                return false;
-            }
-        }
-        true
-    } else if ip_bytes.len() == 16 && constraint.len() == 32 {
-        let ip: [u8; 16] = match ip_bytes.try_into() {
-            Ok(a) => a,
-            Err(_) => return false,
-        };
-        let constraint: [u8; 32] = match constraint.try_into() {
-            Ok(a) => a,
-            Err(_) => return false,
-        };
-        for i in 0..16 {
-            if (ip[i] & constraint[16 + i]) != (constraint[i] & constraint[16 + i]) {
-                return false;
-            }
-        }
-        true
-    } else {
-        false
+    let addr_len = ip_bytes.len();
+    // Constraint must be exactly 2x the address length (address + netmask)
+    if constraint.len() != addr_len * 2 || (addr_len != 4 && addr_len != 16) {
+        return false;
     }
+    let (addr, mask) = constraint.split_at(addr_len);
+    ip_bytes
+        .iter()
+        .zip(addr.iter())
+        .zip(mask.iter())
+        .all(|((ip, a), m)| (ip & m) == (a & m))
 }
 
 // ---------------------------------------------------------------------------
@@ -1270,17 +1259,45 @@ pub fn parse_pem_crl(input: &[u8]) -> Result<Vec<Vec<u8>>, XcertError> {
     Ok(crls)
 }
 
+/// Format a CRL revocation reason code as an RFC 5280-style string.
+fn format_crl_reason(rc: &x509_parser::x509::ReasonCode) -> String {
+    let debug = format!("{:?}", rc);
+    if debug.contains("KeyCompromise") {
+        "keyCompromise".into()
+    } else if debug.contains("CACompromise") || debug.contains("CaCompromise") {
+        "cACompromise".into()
+    } else if debug.contains("AffiliationChanged") {
+        "affiliationChanged".into()
+    } else if debug.contains("Superseded") {
+        "superseded".into()
+    } else if debug.contains("CessationOfOperation") {
+        "cessationOfOperation".into()
+    } else if debug.contains("CertificateHold") {
+        "certificateHold".into()
+    } else if debug.contains("RemoveFromCRL") || debug.contains("RemoveFromCrl") {
+        "removeFromCRL".into()
+    } else if debug.contains("PrivilegeWithdrawn") {
+        "privilegeWithdrawn".into()
+    } else if debug.contains("AACompromise") || debug.contains("AaCompromise") {
+        "aACompromise".into()
+    } else {
+        "unspecified".into()
+    }
+}
+
 /// Check whether a certificate has been revoked according to the given CRLs.
 ///
-/// `cert_der` is the DER-encoded certificate to check.
+/// `cert` is the parsed certificate to check.
 /// `crl_ders` is a slice of DER-encoded CRL data.
 /// `issuer_cert` is the issuer's certificate (used to verify the CRL signature).
+/// `now_ts` is the current Unix timestamp for CRL validity checking.
 ///
 /// Returns `Some(reason)` if revoked, `None` if not revoked.
 pub fn check_crl_revocation(
     cert: &X509Certificate,
     crl_ders: &[Vec<u8>],
     issuer_cert: Option<&X509Certificate>,
+    now_ts: i64,
 ) -> Option<String> {
     let serial = cert.raw_serial();
 
@@ -1296,7 +1313,18 @@ pub fn check_crl_revocation(
             continue;
         }
 
-        // Optionally verify CRL signature against the issuer's public key
+        // RFC 5280 Section 6.3.3: Check CRL validity dates
+        let this_update = crl.last_update().timestamp();
+        if now_ts < this_update {
+            continue; // CRL is not yet valid
+        }
+        if let Some(next_update) = crl.next_update() {
+            if now_ts > next_update.timestamp() {
+                continue; // CRL has expired
+            }
+        }
+
+        // Verify CRL signature against the issuer's public key
         if let Some(issuer) = issuer_cert {
             if crl.verify_signature(issuer.public_key()).is_err() {
                 continue;
@@ -1308,7 +1336,7 @@ pub fn check_crl_revocation(
             if revoked.raw_serial() == serial {
                 let reason = revoked
                     .reason_code()
-                    .map(|rc| format!("{:?}", rc.1))
+                    .map(|rc| format_crl_reason(&rc.1))
                     .unwrap_or_else(|| "unspecified".to_string());
                 return Some(reason);
             }

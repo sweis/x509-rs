@@ -21,12 +21,19 @@ pub fn hex_colon_upper(bytes: &[u8]) -> String {
 /// Encode bytes as base64 with PEM-style 64-character line wrapping.
 pub fn base64_wrap(data: &[u8]) -> String {
     let encoded = base64::engine::general_purpose::STANDARD.encode(data);
-    encoded
-        .as_bytes()
-        .chunks(64)
-        .filter_map(|c| std::str::from_utf8(c).ok())
-        .collect::<Vec<_>>()
-        .join("\n")
+    // Base64 output is always valid ASCII, so we can chunk the string directly.
+    let num_lines = encoded.len().div_ceil(64);
+    let mut result = String::with_capacity(encoded.len() + num_lines);
+    let mut pos = 0;
+    while pos < encoded.len() {
+        if pos > 0 {
+            result.push('\n');
+        }
+        let end = (pos + 64).min(encoded.len());
+        result.push_str(&encoded[pos..end]);
+        pos = end;
+    }
+    result
 }
 
 /// Map common OID dotted-decimal strings to their short name equivalents.

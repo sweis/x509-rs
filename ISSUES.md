@@ -1,128 +1,136 @@
 # Known Issues
 
-Issues identified during code review. Ordered roughly by severity.
+Issues identified during code review. All issues below have been fixed.
 
 ## Security / Correctness
 
-### ~~1. No certificate revocation checking (CRL/OCSP)~~ FIXED
+### ~~1. CRL validity dates are not checked~~ FIXED
 
-**Fix:** Added CRL-based revocation checking. `VerifyOptions` now supports
-`crl_ders`, `crl_check_leaf`, and `crl_check_all` fields. CLI flags
-`--CRLfile`, `--crl-check`, and `--crl-check-all` load and check CRLs
-during chain verification, matching OpenSSL's `-CRLfile -crl_check` behavior.
-CRL signatures are verified against the issuer's public key. Revoked
-certificates are detected with reason codes.
+**Fix:** `check_crl_revocation()` now takes a `now_ts` parameter and validates
+the CRL's `thisUpdate` / `nextUpdate` fields per RFC 5280 Section 6.3.3.
+CRLs that are not yet valid or have expired are skipped.
 
 ---
 
-### ~~2. Key Usage not checked during chain verification~~ FIXED
+### ~~2. CRL signature is not verified for root certificates~~ FIXED
 
-RFC 5280 Section 4.2.1.3 requires that CA certificates used to sign other
-certificates have the `keyCertSign` bit set in the Key Usage extension.
-
-**Fix:** Added keyCertSign check for CA certificates when Key Usage extension
-is present. Verification now fails if a CA certificate has Key Usage but lacks
-the keyCertSign bit.
+**Fix:** The CRL check loop now pre-parses the trusted root certificate when
+available and uses it (or the cert itself for self-signed roots) as the issuer
+for CRL signature verification. The issuer is never `None` for CRL checks.
 
 ---
 
-### ~~3. `check_expiry` does not validate `notBefore`~~ FIXED
+### ~~3. `--crl-check` without `--CRLfile` silently does nothing~~ FIXED
 
-**Fix:** `check_expiry()` now checks that `not_before` is in the past before
-considering the certificate valid. Not-yet-valid certificates return `false`.
+**Fix:** `xcert verify` now validates that `--CRLfile` is provided when
+`--crl-check` or `--crl-check-all` is used, and exits with an error if not.
 
 ---
 
-### ~~4. No Name Constraints checking~~ FIXED
+### ~~4. `der_wrap()` panics on untrusted input~~ FIXED
 
-**Fix:** Added Name Constraints enforcement per RFC 5280 Section 4.2.1.10.
-During chain verification, CA certificates with Name Constraints have their
-permitted and excluded subtrees checked against all subordinate certificates'
-DNS names, email addresses, and IP addresses. Constraints from trust store
-roots are also checked. Test certificates with Name Constraints are included.
+**Fix:** `der_wrap()` now returns `Result<Vec<u8>, XcertError>` instead of
+using `assert!()`. Errors are propagated through `build_spki_pem()` which
+also returns `Result`. No more panics on malformed input.
+
+---
+
+### ~~5. RSA parameter extraction silently returns incorrect values on failure~~ FIXED
+
+**Fix:** `extract_rsa_params()` now returns `Option<(String, u32, u64)>`.
+On parse failure, the caller sets modulus, key_size, and exponent to `None`
+rather than reporting incorrect fallback values.
 
 ---
 
 ## Code Quality
 
-### ~~5. Duplicate hostname matching logic~~ FIXED
+### ~~6. O(n^2) email deduplication in `CertificateInfo::emails()`~~ FIXED
 
-**Fix:** Shared `hostname_matches()` extracted to `util.rs`. Both `check.rs`
-and `verify.rs` now call `util::hostname_matches()`.
-
----
-
-### ~~6. Duplicate OID-to-short-name mappings~~ FIXED
-
-**Fix:** Consolidated into `util::oid_short_name()`. Both `parser.rs` and
-`verify.rs` now use the shared function.
+**Fix:** Replaced `Vec::contains()` deduplication with a `HashSet` for O(1)
+lookup per insertion.
 
 ---
 
-### ~~7. `TrustStore::add_pem_bundle` return value is misleading~~ FIXED
+### ~~7. Duplicate GeneralName formatting logic~~ FIXED
 
-**Fix:** `add_pem_bundle()` now counts only certificates that were successfully
-added via `add_der()`, rather than counting all PEM entries found.
-
----
-
-### ~~8. Unused `load_reference` function in tests~~ FIXED
-
-**Fix:** The unused function was removed. A new `load_reference()` helper and
-`reference_path()` function were added to support the reference vector tests.
+**Fix:** `format_general_name()` now calls `general_name_to_san_entry()` and
+extracts the inner string, eliminating the duplicate match arms.
 
 ---
 
-### ~~9. 116 reference test vectors are unused~~ FIXED
+### ~~8. Unnecessary Vec allocation for PEM detection~~ FIXED
 
-**Fix:** Added a `reference_vectors` test module with 9 tests that compare
-library output against OpenSSL reference files: serial numbers, SHA-256 and
-SHA-1 fingerprints, subject and issuer DN components, RSA modulus, email
-addresses, and OCSP URIs.
-
----
-
-## Missing Features
-
-### ~~10. No `--partial-chain` option~~ FIXED
-
-**Fix:** Added `partial_chain` field to `VerifyOptions` and `--partial-chain`
-CLI flag. When enabled, verification succeeds if any certificate in the chain
-is directly in the trust store.
+**Fix:** Both `parse_cert()` in `parser.rs` and the convert command in
+`main.rs` now use iterator-based comparison (`iter().take(10).eq(...)`)
+instead of collecting into a `Vec<u8>`.
 
 ---
 
-### ~~11. No Extended Key Usage checking during verification~~ FIXED
+### ~~9. `base64_wrap()` uses unnecessary intermediate allocations~~ FIXED
 
-**Fix:** Added `purpose` field to `VerifyOptions` and `--purpose` CLI flag.
-When specified, the leaf certificate's EKU extension is checked for the
-required OID (e.g., `1.3.6.1.5.5.7.3.1` for serverAuth).
+**Fix:** Replaced byte-chunking with `from_utf8` and `Vec<&str>::join()` with
+direct string slicing into a pre-allocated `String`. No intermediate Vec or
+UTF-8 validation needed since base64 is ASCII.
 
 ---
 
-### ~~12. No LICENSE file~~ FIXED
+### ~~10. Duplicate extension search methods in `fields.rs`~~ FIXED
 
-**Fix:** Added MIT LICENSE file and updated README reference.
+**Fix:** Replaced manual `for/if let/return` loops in `san_entries()`,
+`ocsp_urls()`, `key_usage()`, and `ext_key_usage()` with idiomatic
+`find_map()` calls.
+
+---
+
+### ~~11. `dns_name_matches_constraint` allocates on every call~~ FIXED
+
+**Fix:** Replaced `name.ends_with(&format!(".{}", constraint))` with a
+non-allocating length + suffix + byte check.
+
+---
+
+### ~~12. `ip_matches_constraint` has duplicate IPv4/IPv6 masking loops~~ FIXED
+
+**Fix:** Consolidated into a single generic implementation using
+`split_at(addr_len)` and `Iterator::zip().all()`.
+
+---
+
+### ~~13. `check_host` collects SAN DNS entries into unnecessary Vec~~ FIXED
+
+**Fix:** Replaced `Vec<&str>` collect + `is_empty()` check + iterate with a
+single-pass loop that tracks `has_san_dns` and matches in one iteration.
+
+---
+
+### ~~14. `to_oneline` uses intermediate Vec and `replace()` chain~~ FIXED
+
+**Fix:** Replaced `collect::<Vec<_>>().join(", ")` with direct `String`
+building, and replaced the three `.replace()` calls with a single char-by-char
+escape loop.
 
 ---
 
 ## Minor
 
-### ~~13. `docs/cli-interface.md` does not document `verify` subcommand~~ FIXED
+### ~~15. CRL reason code uses Debug formatting~~ FIXED
 
-**Fix:** Added full `xcert verify` documentation to `cli-interface.md`
-including all options, examples, and comparison table entries.
-
----
-
-### ~~14. Version display is redundant~~ FIXED
-
-**Fix:** Changed `Version: 3 (v3)` to `Version: 3 (0x2)` matching OpenSSL's
-format of showing the human-readable version and the ASN.1 encoded value.
+**Fix:** Added `format_crl_reason()` function that maps `ReasonCode` debug
+representations to RFC 5280-style camelCase strings (e.g., `keyCompromise`,
+`cACompromise`, `cessationOfOperation`).
 
 ---
 
-### ~~15. No CI configuration~~ FIXED
+### ~~16. No X.509 version validation~~ FIXED
 
-**Fix:** Added `.github/workflows/ci.yml` with test, clippy, and fmt jobs
-running on push/PR to main.
+**Fix:** `build_certificate_info()` now validates that the X.509 version
+field is 0, 1, or 2 (v1, v2, v3) and returns `XcertError::ParseError` for
+unsupported version values.
+
+---
+
+### ~~17. `check_email` and `check_ip` use verbose loops~~ FIXED
+
+**Fix:** Simplified both functions to use iterator `.any()` and `matches!()`
+instead of explicit `for` loops with early return.
