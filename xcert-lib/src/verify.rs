@@ -377,6 +377,36 @@ pub fn parse_pem_chain(input: &[u8]) -> Result<Vec<Vec<u8>>, XcertError> {
     Ok(certs)
 }
 
+/// Check whether a list of DER-encoded certificates appears to form a chain
+/// (each cert's issuer matches the next cert's subject) rather than an
+/// unrelated bundle of independent certificates (e.g. a CA bundle).
+///
+/// Returns `true` if the certificates form a chain (or there's 0-1 certs).
+/// Returns `false` if consecutive certificates lack issuer-subject linkage.
+pub fn is_certificate_chain(certs_der: &[Vec<u8>]) -> bool {
+    if certs_der.len() <= 1 {
+        return true;
+    }
+
+    // Check if cert[0]'s issuer matches cert[1]'s subject
+    let cert0 = match certs_der
+        .first()
+        .and_then(|der| X509Certificate::from_der(der).ok())
+    {
+        Some((_, cert)) => cert,
+        None => return true, // can't parse; assume chain and let verification handle errors
+    };
+    let cert1 = match certs_der
+        .get(1)
+        .and_then(|der| X509Certificate::from_der(der).ok())
+    {
+        Some((_, cert)) => cert,
+        None => return true,
+    };
+
+    cert0.issuer().as_raw() == cert1.subject().as_raw()
+}
+
 /// Verify a certificate chain provided as a list of DER-encoded certificates.
 ///
 /// The chain should be ordered leaf-first: `[leaf, intermediate..., (optional root)]`.

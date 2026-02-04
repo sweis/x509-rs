@@ -359,25 +359,30 @@ struct BatchResult {
 
 /// Process certificate files in parallel, printing `filename: result`.
 ///
+/// The closure may return multiple results per file (e.g. for CA bundles
+/// containing many independent certificates).
+///
 /// Returns the number of failures.
 fn run_batch<F>(files: &[PathBuf], failures_only: bool, op: F) -> usize
 where
-    F: Fn(&Path) -> BatchResult + Sync,
+    F: Fn(&Path) -> Vec<BatchResult> + Sync,
 {
-    let results: Vec<BatchResult> = files.par_iter().map(|f| op(f)).collect();
+    let results: Vec<Vec<BatchResult>> = files.par_iter().map(|f| op(f)).collect();
 
     let mut failures = 0;
-    for r in &results {
-        if !r.pass {
-            failures += 1;
-        }
-        if failures_only && r.pass {
-            continue;
-        }
-        if r.pass {
-            println!("{}: {}", r.path, r.detail);
-        } else {
-            eprintln!("{}: {}", r.path, r.detail);
+    for batch in &results {
+        for r in batch {
+            if !r.pass {
+                failures += 1;
+            }
+            if failures_only && r.pass {
+                continue;
+            }
+            if r.pass {
+                println!("{}: {}", r.path, r.detail);
+            } else {
+                eprintln!("{}: {}", r.path, r.detail);
+            }
         }
     }
     failures
@@ -549,21 +554,21 @@ fn main() -> Result<()> {
                         let data = match std::fs::read(f) {
                             Ok(d) => d,
                             Err(e) => {
-                                return BatchResult {
+                                return vec![BatchResult {
                                     path: label,
                                     pass: false,
                                     detail: format!("FAIL (read error: {})", e),
-                                }
+                                }]
                             }
                         };
                         let cert = match parse_input(&data, force_der, force_pem) {
                             Ok(c) => c,
                             Err(e) => {
-                                return BatchResult {
+                                return vec![BatchResult {
                                     path: label,
                                     pass: false,
                                     detail: format!("FAIL (parse error: {})", e),
-                                }
+                                }]
                             }
                         };
                         let pass = match check_type {
@@ -574,7 +579,7 @@ fn main() -> Result<()> {
                             CheckType::Email => xcert_lib::check_email(&cert, &check_value),
                             CheckType::Ip => xcert_lib::check_ip(&cert, &check_value),
                         };
-                        BatchResult {
+                        vec![BatchResult {
                             path: label,
                             pass,
                             detail: if pass {
@@ -582,7 +587,7 @@ fn main() -> Result<()> {
                             } else {
                                 "FAIL".to_string()
                             },
-                        }
+                        }]
                     });
                     if failures > 0 {
                         std::process::exit(1);
@@ -749,50 +754,105 @@ fn main() -> Result<()> {
                         let data = match std::fs::read(f) {
                             Ok(d) => d,
                             Err(e) => {
-                                return BatchResult {
+                                return vec![BatchResult {
                                     path: label,
                                     pass: false,
                                     detail: format!("FAIL (read error: {})", e),
-                                }
+                                }]
                             }
                         };
-                        let result = if let Some(untrusted_path) = untrusted {
+                        if let Some(untrusted_path) = untrusted {
                             let leaf_der = match xcert_lib::pem_to_der(&data) {
                                 Ok(d) => d,
                                 Err(e) => {
-                                    return BatchResult {
+                                    return vec![BatchResult {
                                         path: label,
                                         pass: false,
                                         detail: format!("FAIL (parse error: {})", e),
-                                    }
+                                    }]
                                 }
                             };
                             let untrusted_data = match std::fs::read(untrusted_path) {
                                 Ok(d) => d,
                                 Err(e) => {
-                                    return BatchResult {
+                                    return vec![BatchResult {
                                         path: label,
                                         pass: false,
                                         detail: format!("FAIL (read untrusted: {})", e),
-                                    }
+                                    }]
                                 }
                             };
-                            xcert_lib::verify_with_untrusted(
+                            let result = xcert_lib::verify_with_untrusted(
                                 &leaf_der,
                                 &untrusted_data,
                                 &trust_store,
                                 hostname.as_deref(),
                                 &options,
-                            )
-                        } else {
-                            xcert_lib::verify_pem_chain_with_options(
-                                &data,
-                                &trust_store,
-                                hostname.as_deref(),
-                                &options,
-                            )
+                            );
+                            return vec![match result {
+                                Ok(r) => BatchResult {
+                                    path: label,
+                                    pass: r.is_valid,
+                                    detail: format!("{}", r),
+                                },
+                                Err(e) => BatchResult {
+                                    path: label,
+                                    pass: false,
+                                    detail: format!("FAIL ({})", e),
+                                },
+                            }];
+                        }
+
+                        // Parse PEM and detect bundle vs chain
+                        let certs_der = match xcert_lib::parse_pem_chain(&data) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return vec![BatchResult {
+                                    path: label,
+                                    pass: false,
+                                    detail: format!("FAIL (parse error: {})", e),
+                                }]
+                            }
                         };
-                        match result {
+
+                        // If the certs don't form a chain (e.g. CA bundle),
+                        // verify each certificate individually.
+                        if !xcert_lib::is_certificate_chain(&certs_der) {
+                            return certs_der
+                                .iter()
+                                .enumerate()
+                                .map(|(i, cert_der)| {
+                                    let cert_label = format!("{}[{}]", label, i);
+                                    let result = xcert_lib::verify_chain_with_options(
+                                        std::slice::from_ref(cert_der),
+                                        &trust_store,
+                                        hostname.as_deref(),
+                                        &options,
+                                    );
+                                    match result {
+                                        Ok(r) => BatchResult {
+                                            path: cert_label,
+                                            pass: r.is_valid,
+                                            detail: format!("{}", r),
+                                        },
+                                        Err(e) => BatchResult {
+                                            path: cert_label,
+                                            pass: false,
+                                            detail: format!("FAIL ({})", e),
+                                        },
+                                    }
+                                })
+                                .collect();
+                        }
+
+                        // Normal chain verification
+                        let result = xcert_lib::verify_chain_with_options(
+                            &certs_der,
+                            &trust_store,
+                            hostname.as_deref(),
+                            &options,
+                        );
+                        vec![match result {
                             Ok(r) => BatchResult {
                                 path: label,
                                 pass: r.is_valid,
@@ -803,7 +863,7 @@ fn main() -> Result<()> {
                                 pass: false,
                                 detail: format!("FAIL ({})", e),
                             },
-                        }
+                        }]
                     });
                     if failures > 0 {
                         std::process::exit(2);
@@ -814,8 +874,11 @@ fn main() -> Result<()> {
 
             // Single file mode
             let input = read_input(file.as_ref())?;
+            let label = file
+                .as_ref()
+                .map_or("stdin".to_string(), |f| f.display().to_string());
 
-            let result = if let Some(untrusted_path) = untrusted {
+            if let Some(untrusted_path) = untrusted.as_ref() {
                 let leaf_der = xcert_lib::pem_to_der(&input)?;
                 let untrusted_data = std::fs::read(untrusted_path).with_context(|| {
                     format!(
@@ -823,29 +886,17 @@ fn main() -> Result<()> {
                         untrusted_path.display()
                     )
                 })?;
-                xcert_lib::verify_with_untrusted(
+                let result = xcert_lib::verify_with_untrusted(
                     &leaf_der,
                     &untrusted_data,
                     &trust_store,
                     hostname.as_deref(),
                     &options,
-                )?
-            } else {
-                xcert_lib::verify_pem_chain_with_options(
-                    &input,
-                    &trust_store,
-                    hostname.as_deref(),
-                    &options,
-                )?
-            };
+                )?;
 
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else {
-                let label = file
-                    .as_ref()
-                    .map_or("stdin".to_string(), |f| f.display().to_string());
-                if result.is_valid {
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                } else if result.is_valid {
                     println!("{}: {}", label, result);
                     if *show_chain {
                         for info in &result.chain {
@@ -858,10 +909,72 @@ fn main() -> Result<()> {
                 } else {
                     eprintln!("{}: {}", label, result);
                 }
-            }
+                if !result.is_valid {
+                    std::process::exit(2);
+                }
+            } else {
+                // Parse PEM and detect bundle vs chain
+                let certs_der = xcert_lib::parse_pem_chain(&input)?;
 
-            if !result.is_valid {
-                std::process::exit(2);
+                if !xcert_lib::is_certificate_chain(&certs_der) {
+                    // Bundle: verify each certificate individually
+                    let mut any_invalid = false;
+                    for (i, cert_der) in certs_der.iter().enumerate() {
+                        let cert_label = format!("{}[{}]", label, i);
+                        let result = xcert_lib::verify_chain_with_options(
+                            std::slice::from_ref(cert_der),
+                            &trust_store,
+                            hostname.as_deref(),
+                            &options,
+                        );
+                        match result {
+                            Ok(r) => {
+                                if *json {
+                                    println!("{}", serde_json::to_string_pretty(&r)?);
+                                } else if r.is_valid {
+                                    println!("{}: {}", cert_label, r);
+                                } else {
+                                    eprintln!("{}: {}", cert_label, r);
+                                    any_invalid = true;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("{}: FAIL ({})", cert_label, e);
+                                any_invalid = true;
+                            }
+                        }
+                    }
+                    if any_invalid {
+                        std::process::exit(2);
+                    }
+                } else {
+                    // Chain: verify as a chain
+                    let result = xcert_lib::verify_chain_with_options(
+                        &certs_der,
+                        &trust_store,
+                        hostname.as_deref(),
+                        &options,
+                    )?;
+
+                    if *json {
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    } else if result.is_valid {
+                        println!("{}: {}", label, result);
+                        if *show_chain {
+                            for info in &result.chain {
+                                println!(
+                                    "depth {}: subject = {}, issuer = {}",
+                                    info.depth, info.subject, info.issuer
+                                );
+                            }
+                        }
+                    } else {
+                        eprintln!("{}: {}", label, result);
+                    }
+                    if !result.is_valid {
+                        std::process::exit(2);
+                    }
+                }
             }
         }
     }
