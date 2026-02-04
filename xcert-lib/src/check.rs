@@ -16,9 +16,10 @@ pub fn check_expiry(cert: &CertificateInfo, seconds: u64) -> bool {
         .unwrap_or_default()
         .as_secs();
 
-    // Check notBefore: certificate must already be valid
+    // Check notBefore: certificate must already be valid.
+    // Compare in signed arithmetic to correctly handle pre-epoch timestamps.
     let not_before = cert.not_before.timestamp;
-    if not_before > 0 && (not_before as u64) > now {
+    if not_before > (now as i64) {
         return false;
     }
 
@@ -94,7 +95,7 @@ pub(crate) fn normalize_ip(ip: &str) -> String {
         let segments = addr.segments();
         return segments
             .iter()
-            .map(|s| format!("{:x}", s))
+            .map(|s| format!("{:X}", s))
             .collect::<Vec<_>>()
             .join(":");
     }

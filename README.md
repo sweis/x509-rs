@@ -136,9 +136,24 @@ xcert field extensions --ext "Key Usage" cert.pem
 
 Returns exit code 0 for pass, 1 for fail. Useful in scripts and CI.
 
+The `expiry` check accepts durations in [humantime](https://docs.rs/humantime)
+format. Plain numbers default to seconds. Supported units include `s` (seconds),
+`m`/`min` (minutes), `h`/`hr` (hours), `d`/`day` (days), `w`/`week` (weeks),
+`month` (months), and `y`/`year` (years). Units can be combined: `1h30m`,
+`2d12h`, `1w3d`.
+
 ```bash
-# Check if cert expires within 30 days (2592000 seconds)
+# Check if cert expires within 30 days
+xcert check expiry 30d cert.pem
+
+# Same check in seconds (backwards compatible)
 xcert check expiry 2592000 cert.pem
+
+# Check if cert is valid for at least 1 week
+xcert check expiry 1w cert.pem
+
+# Combined units: valid for 2 hours and 30 minutes?
+xcert check expiry 2h30m cert.pem
 
 # Check hostname match (RFC 6125 with wildcard support)
 xcert check host www.example.com cert.pem
@@ -150,7 +165,7 @@ xcert check email user@example.com cert.pem
 xcert check ip 93.184.216.34 cert.pem
 
 # Use in a script
-if xcert check expiry 604800 cert.pem; then
+if xcert check expiry 7d cert.pem; then
   echo "Certificate valid for at least 7 more days"
 else
   echo "Certificate expires within 7 days!"
@@ -237,7 +252,7 @@ Exit code 0 means verification passed, exit code 2 means verification failed.
 | `openssl x509 -email -noout -in cert.pem` | `xcert field emails cert.pem` |
 | `openssl x509 -ext subjectAltName -noout -in cert.pem` | `xcert field san cert.pem` |
 | `openssl x509 -ocsp_uri -noout -in cert.pem` | `xcert field ocsp-url cert.pem` |
-| `openssl x509 -checkend 3600 -noout -in cert.pem` | `xcert check expiry 3600 cert.pem` |
+| `openssl x509 -checkend 3600 -noout -in cert.pem` | `xcert check expiry 1h cert.pem` |
 | `openssl x509 -checkhost foo.com -noout -in cert.pem` | `xcert check host foo.com cert.pem` |
 | `openssl x509 -checkip 1.2.3.4 -noout -in cert.pem` | `xcert check ip 1.2.3.4 cert.pem` |
 | `openssl x509 -checkemail a@b.com -noout -in cert.pem` | `xcert check email a@b.com cert.pem` |
