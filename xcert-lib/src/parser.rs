@@ -4,8 +4,8 @@ use crate::fields::{
     AiaEntry, CertificateInfo, DateTime, DistinguishedName, Extension, ExtensionValue,
     PublicKeyInfo, SanEntry,
 };
+use crate::util;
 use crate::XcertError;
-use base64::Engine;
 use x509_parser::der_parser::asn1_rs;
 use x509_parser::prelude::*;
 
@@ -103,14 +103,10 @@ fn build_certificate_info(
 /// stripping leading zero bytes but keeping at least one byte.
 fn format_serial(raw: &[u8]) -> String {
     let stripped = match raw.iter().position(|&b| b != 0) {
-        Some(pos) => &raw[pos..],
-        None => &raw[raw.len().saturating_sub(1)..],
+        Some(pos) => raw.get(pos..).unwrap_or(raw),
+        None => raw.get(raw.len().saturating_sub(1)..).unwrap_or(raw),
     };
-    stripped
-        .iter()
-        .map(|b| format!("{:02X}", b))
-        .collect::<Vec<_>>()
-        .join(":")
+    util::hex_colon_upper(stripped)
 }
 
 fn format_sig_algorithm(algo: &AlgorithmIdentifier) -> String {
@@ -242,27 +238,18 @@ fn extract_rsa_modulus(data: &[u8]) -> (String, u32) {
                 if let Ok(bigint) = modulus_obj.as_bigint() {
                     let bytes = bigint.to_bytes_be().1;
                     // Skip leading zero byte used for DER positive integer encoding
-                    let significant = if !bytes.is_empty() && bytes[0] == 0 {
-                        &bytes[1..]
-                    } else {
-                        &bytes[..]
+                    let significant = match bytes.split_first() {
+                        Some((&0, rest)) if !rest.is_empty() => rest,
+                        _ => &bytes,
                     };
-                    let hex = significant
-                        .iter()
-                        .map(|b| format!("{:02X}", b))
-                        .collect::<String>();
                     let bits = (significant.len() as u32) * 8;
-                    return (hex, bits);
+                    return (hex::encode_upper(significant), bits);
                 }
             }
         }
     }
-    let hex = data
-        .iter()
-        .map(|b| format!("{:02X}", b))
-        .collect::<String>();
     let bits = (data.len() as u32) * 8;
-    (hex, bits)
+    (hex::encode_upper(data), bits)
 }
 
 fn extract_ec_curve(algo: &AlgorithmIdentifier) -> String {
@@ -320,19 +307,8 @@ fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> String {
 
     format!(
         "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
-        base64_encode_pem(&spki_der)
+        util::base64_wrap(&spki_der)
     )
-}
-
-/// Encode bytes as base64 with PEM-style 64-character line wrapping.
-fn base64_encode_pem(data: &[u8]) -> String {
-    let encoded = base64::engine::general_purpose::STANDARD.encode(data);
-    encoded
-        .as_bytes()
-        .chunks(64)
-        .filter_map(|c| std::str::from_utf8(c).ok())
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn der_length_size(len: usize) -> usize {
@@ -448,21 +424,13 @@ fn build_extension(ext: &X509Extension) -> Result<Extension, XcertError> {
             ExtensionValue::SubjectAltName(entries)
         }
         ParsedExtension::SubjectKeyIdentifier(ski) => {
-            let hex = ski
-                .0
-                .iter()
-                .map(|b| format!("{:02X}", b))
-                .collect::<Vec<_>>()
-                .join(":");
-            ExtensionValue::SubjectKeyIdentifier(hex)
+            ExtensionValue::SubjectKeyIdentifier(util::hex_colon_upper(ski.0))
         }
         ParsedExtension::AuthorityKeyIdentifier(aki) => {
-            let key_id = aki.key_identifier.as_ref().map(|ki| {
-                ki.0.iter()
-                    .map(|b| format!("{:02X}", b))
-                    .collect::<Vec<_>>()
-                    .join(":")
-            });
+            let key_id = aki
+                .key_identifier
+                .as_ref()
+                .map(|ki| util::hex_colon_upper(ki.0));
             let issuer = aki.authority_cert_issuer.as_ref().map(|names| {
                 names
                     .iter()
@@ -491,12 +459,12 @@ fn build_extension(ext: &X509Extension) -> Result<Extension, XcertError> {
         ParsedExtension::CRLDistributionPoints(cdp) => {
             let mut uris = Vec::new();
             for point in &cdp.points {
-                if let Some(dn) = &point.distribution_point {
-                    if let x509_parser::extensions::DistributionPointName::FullName(names) = dn {
-                        for gn in names {
-                            if let GeneralName::URI(uri) = gn {
-                                uris.push(uri.to_string());
-                            }
+                if let Some(x509_parser::extensions::DistributionPointName::FullName(names)) =
+                    &point.distribution_point
+                {
+                    for gn in names {
+                        if let GeneralName::URI(uri) = gn {
+                            uris.push(uri.to_string());
                         }
                     }
                 }

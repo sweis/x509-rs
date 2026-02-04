@@ -1,20 +1,13 @@
 //! PEM <-> DER format conversion.
 
+use crate::util;
 use crate::XcertError;
-use base64::Engine;
 
 /// Convert DER-encoded certificate bytes to a PEM string.
 pub fn der_to_pem(der: &[u8]) -> String {
-    let encoded = base64::engine::general_purpose::STANDARD.encode(der);
-    let wrapped = encoded
-        .as_bytes()
-        .chunks(64)
-        .filter_map(|c| std::str::from_utf8(c).ok())
-        .collect::<Vec<_>>()
-        .join("\n");
     format!(
         "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
-        wrapped
+        util::base64_wrap(der)
     )
 }
 

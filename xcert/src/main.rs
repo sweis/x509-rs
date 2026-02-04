@@ -125,6 +125,16 @@ fn read_input(file: Option<&PathBuf>) -> Result<Vec<u8>> {
     }
 }
 
+fn parse_input(input: &[u8], der: bool, pem: bool) -> Result<xcert_lib::CertificateInfo> {
+    if der {
+        Ok(xcert_lib::parse_der(input)?)
+    } else if pem {
+        Ok(xcert_lib::parse_pem(input)?)
+    } else {
+        Ok(xcert_lib::parse_cert(input)?)
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -137,13 +147,7 @@ fn main() -> Result<()> {
             all,
         } => {
             let input = read_input(file.as_ref())?;
-            let cert = if *der {
-                xcert_lib::parse_der(&input)?
-            } else if *pem {
-                xcert_lib::parse_pem(&input)?
-            } else {
-                xcert_lib::parse_cert(&input)?
-            };
+            let cert = parse_input(&input, *der, *pem)?;
 
             if *json {
                 println!("{}", xcert_lib::to_json(&cert)?);
@@ -161,13 +165,7 @@ fn main() -> Result<()> {
             ..
         } => {
             let input = read_input(file.as_ref())?;
-            let cert = if *der {
-                xcert_lib::parse_der(&input)?
-            } else if *pem {
-                xcert_lib::parse_pem(&input)?
-            } else {
-                xcert_lib::parse_cert(&input)?
-            };
+            let cert = parse_input(&input, *der, *pem)?;
 
             let output = match field {
                 FieldName::Subject => cert.subject_string(),
@@ -240,13 +238,7 @@ fn main() -> Result<()> {
             pem,
         } => {
             let input = read_input(file.as_ref())?;
-            let cert = if *der {
-                xcert_lib::parse_der(&input)?
-            } else if *pem {
-                xcert_lib::parse_pem(&input)?
-            } else {
-                xcert_lib::parse_cert(&input)?
-            };
+            let cert = parse_input(&input, *der, *pem)?;
 
             let pass = match check {
                 CheckType::Expiry => {

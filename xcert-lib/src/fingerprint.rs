@@ -1,6 +1,7 @@
 //! Certificate fingerprint (digest) computation.
 
 use crate::fields::DigestAlgorithm;
+use crate::util;
 use digest::Digest;
 
 /// Compute the fingerprint of DER-encoded certificate bytes.
@@ -14,9 +15,5 @@ pub fn compute_fingerprint(der_bytes: &[u8], algorithm: DigestAlgorithm) -> Stri
         DigestAlgorithm::Sha1 => sha1::Sha1::digest(der_bytes).to_vec(),
     };
 
-    hash_bytes
-        .iter()
-        .map(|b| format!("{:02X}", b))
-        .collect::<Vec<_>>()
-        .join(":")
+    util::hex_colon_upper(&hash_bytes)
 }

@@ -99,9 +99,11 @@ fn hostname_matches(pattern: &str, hostname: &str) -> bool {
     // Wildcard matching: *.example.com
     if let Some(suffix) = pattern_lower.strip_prefix("*.") {
         if let Some(rest) = hostname.strip_suffix(suffix) {
-            // rest should be "something." (a single label followed by a dot)
-            if rest.ends_with('.') && !rest[..rest.len() - 1].contains('.') && rest.len() > 1 {
-                return true;
+            // rest should be "label." (a single label followed by a dot)
+            if let Some(label) = rest.strip_suffix('.') {
+                if !label.is_empty() && !label.contains('.') {
+                    return true;
+                }
             }
         }
     }
