@@ -3106,15 +3106,16 @@ mod verify_options {
     fn verify_depth_exceeded() {
         let chain = main_chain_der();
         let store = main_trust_store();
-        // chain has 3 certs; set max depth to 2
+        // chain has 3 certs (leaf + intermediate + root), so 2 intermediates.
+        // Setting max depth to 1 means only 1 intermediate allowed → should fail.
         let options = VerifyOptions {
-            verify_depth: Some(2),
+            verify_depth: Some(1),
             ..VerifyOptions::default()
         };
         let result = verify_chain_with_options(&chain, &store, None, &options);
         assert!(
             result.is_err(),
-            "should error when chain exceeds verify_depth"
+            "should error when intermediates exceed verify_depth"
         );
     }
 
@@ -3122,16 +3123,17 @@ mod verify_options {
     fn verify_depth_exact_passes() {
         let chain = main_chain_der();
         let store = main_trust_store();
-        // chain has 3 certs; set max depth to 3 (exact fit)
+        // chain has 3 certs (leaf + intermediate + root), so 2 intermediates.
+        // Setting max depth to 2 means exactly 2 intermediates allowed → should pass.
         let options = VerifyOptions {
-            verify_depth: Some(3),
+            verify_depth: Some(2),
             ..VerifyOptions::default()
         };
         let result = verify_chain_with_options(&chain, &store, None, &options)
             .expect("verification should not error");
         assert!(
             result.is_valid,
-            "chain should pass when depth equals verify_depth: {:?}",
+            "chain should pass when intermediates equals verify_depth: {:?}",
             result.errors
         );
     }
@@ -3897,12 +3899,6 @@ mod limbo {
             "rfc5280::ski::critical-ski",
             "rfc5280::ski::intermediate-missing-ski",
             "rfc5280::ski::root-missing-ski",
-            // RFC5280_STRICT: Unknown critical extension rejection.
-            "rfc5280::unknown-critical-extension-ee",
-            "rfc5280::unknown-critical-extension-intermediate",
-            "rfc5280::unknown-critical-extension-root",
-            // RFC5280_STRICT: Duplicate extension detection.
-            "rfc5280::duplicate-extensions",
             // RFC5280_STRICT: Root certificate validation.
             "rfc5280::root-missing-basic-constraints",
             "rfc5280::root-non-critical-basic-constraints",
@@ -3921,19 +3917,12 @@ mod limbo {
             "rfc5280::ee-critical-aia-invalid",
             "rfc5280::ca-empty-subject",
             "rfc5280::pc::ica-noncritical-pc",
-            // RFC5280_STRICT: Expired root in trust store.
-            "rfc5280::validity::expired-root",
             // NAME_CONSTRAINTS: Edge cases in name constraint validation.
             "rfc5280::nc::invalid-dnsname-leading-period",
             "rfc5280::nc::nc-forbids-alternate-chain-ica",
             "rfc5280::nc::nc-forbids-othername",
             "rfc5280::nc::nc-forbids-same-chain-ica",
             "rfc5280::nc::nc-permits-invalid-dns-san",
-            "rfc5280::nc::not-allowed-in-ee-critical",
-            "rfc5280::nc::not-allowed-in-ee-noncritical",
-            "rfc5280::nc::permitted-dns-match-noncritical",
-            "rfc5280::nc::permitted-ipv4-match",
-            "rfc5280::nc::permitted-ipv6-match",
             "rfc5280::nc::permitted-self-issued",
             // WEBPKI_POLICY: Root AKI validation.
             "webpki::aki::root-with-aki-all-fields",
@@ -3941,8 +3930,13 @@ mod limbo {
             "webpki::aki::root-with-aki-authoritycertserialnumber",
             "webpki::aki::root-with-aki-missing-keyidentifier",
             "webpki::aki::root-with-aki-ski-mismatch",
-            // WEBPKI_POLICY: CN matching restrictions (WebPKI requires SAN).
+            // WEBPKI_POLICY: CN matching restrictions (WebPKI requires SAN,
+            // CABF BR 7.1.4.3 CN format rules for IP addresses).
             "webpki::cn::case-mismatch",
+            "webpki::cn::ipv4-hex-mismatch",
+            "webpki::cn::ipv4-leading-zeros-mismatch",
+            "webpki::cn::ipv6-non-rfc5952-mismatch",
+            "webpki::cn::ipv6-uncompressed-mismatch",
             "webpki::cn::ipv6-uppercase-mismatch",
             "webpki::cn::not-in-san",
             "webpki::cn::punycode-not-in-san",
@@ -3959,7 +3953,6 @@ mod limbo {
             "webpki::forbidden-rsa-not-divisable-by-8-in-root",
             "webpki::forbidden-weak-rsa-in-leaf",
             // WEBPKI_POLICY: SAN requirements and edge cases.
-            "webpki::san::exact-localhost-ip-san",
             "webpki::san::no-san",
             "webpki::san::public-suffix-wildcard-san",
             "webpki::san::san-critical-with-nonempty-subject",
@@ -3968,14 +3961,13 @@ mod limbo {
             "webpki::ee-basicconstraints-ca",
             "webpki::malformed-aia",
             "webpki::v1-cert",
-            // WEBPKI_POLICY: Name constraint edge cases.
+            // WEBPKI_POLICY: Name constraint edge cases. CABF permits non-critical
+            // NC as an explicit exception to RFC 5280, but we enforce RFC 5280 strictly.
             "webpki::nc::intermediate-permitted-excluded-subtrees-both-empty-sequences",
             "webpki::nc::intermediate-permitted-excluded-subtrees-both-null",
-            // CHAIN_DEPTH: max_chain_depth counting differences.
-            "pathlen::max-chain-depth-0",
-            "pathlen::max-chain-depth-1",
-            "pathlen::max-chain-depth-1-self-issued",
+            "webpki::nc::permitted-dns-match-noncritical",
             // CHAIN_DEPTH: Self-issued certificate and pathlen interaction.
+            "pathlen::max-chain-depth-1-self-issued",
             "pathlen::intermediate-pathlen-may-increase",
             "pathlen::self-issued-certs-pathlen",
             // CRL_STRICT: CRL number extension validation.

@@ -10,7 +10,7 @@
 use crate::util;
 use crate::XcertError;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use x509_parser::prelude::*;
@@ -445,10 +445,13 @@ pub fn verify_chain_with_options(
     }
 
     let max_depth = options.verify_depth.unwrap_or(MAX_CHAIN_DEPTH);
-    if chain_der.len() > max_depth {
+    // max_chain_depth counts the maximum number of intermediate certificates
+    // (excluding the leaf and the trust anchor root).
+    let num_intermediates = chain_der.len().saturating_sub(1);
+    if num_intermediates > max_depth {
         return Err(XcertError::VerifyError(format!(
-            "certificate chain exceeds maximum depth of {}",
-            max_depth
+            "certificate chain exceeds maximum depth of {} (has {} intermediates)",
+            max_depth, num_intermediates
         )));
     }
 
@@ -544,6 +547,61 @@ pub fn verify_chain_with_options(
                 if version >= 2 {
                     errors.push(format!(
                         "certificate at depth {} ({}) is not a CA but is used as issuer",
+                        i, subject
+                    ));
+                }
+            }
+        }
+    }
+
+    // RFC 5280 Section 4.2: Reject certificates with unknown critical extensions.
+    // An implementation MUST reject a certificate if it encounters a critical
+    // extension it does not recognize.
+    for (i, (_, x509)) in parsed.iter().enumerate() {
+        let subject = crate::parser::build_dn(x509.subject()).to_oneline();
+        for ext in x509.extensions() {
+            if ext.critical && !is_known_extension(ext.oid.to_id_string().as_str()) {
+                errors.push(format!(
+                    "certificate at depth {} ({}) has unrecognized critical extension {}",
+                    i, subject, ext.oid
+                ));
+            }
+        }
+    }
+
+    // RFC 5280 Section 4.2: A certificate MUST NOT include more than one
+    // instance of a particular extension.
+    for (i, (_, x509)) in parsed.iter().enumerate() {
+        let mut seen = HashSet::new();
+        for ext in x509.extensions() {
+            if !seen.insert(ext.oid.to_id_string()) {
+                let subject = crate::parser::build_dn(x509.subject()).to_oneline();
+                errors.push(format!(
+                    "certificate at depth {} ({}) has duplicate extension {}",
+                    i, subject, ext.oid
+                ));
+                break; // one duplicate error per certificate is enough
+            }
+        }
+    }
+
+    // RFC 5280 Section 4.2.1.10: Name Constraints MUST NOT appear in EE
+    // certificates and MUST be critical when present.
+    for (i, (_, x509)) in parsed.iter().enumerate() {
+        let is_leaf = i == 0;
+        for ext in x509.extensions() {
+            if ext.oid.to_id_string() == "2.5.29.30" {
+                let subject = crate::parser::build_dn(x509.subject()).to_oneline();
+                if is_leaf {
+                    errors.push(format!(
+                        "certificate at depth {} ({}) is an end-entity but contains \
+                         Name Constraints extension",
+                        i, subject
+                    ));
+                } else if !ext.critical {
+                    errors.push(format!(
+                        "certificate at depth {} ({}) has Name Constraints extension \
+                         that is not marked critical",
                         i, subject
                     ));
                 }
@@ -668,14 +726,48 @@ pub fn verify_chain_with_options(
         }
     }
 
-    // Check Name Constraints from the trusted root against the entire chain.
-    // This handles the case where the root is not in the chain itself but
-    // was found in the trust store.
+    // Check the trusted root from the trust store: time validity, Name
+    // Constraints, unknown critical extensions, and duplicate extensions.
     if let Some(ref root_der) = trusted_root_der {
         if let Ok((_, root_x509)) = X509Certificate::from_der(root_der) {
+            let root_subject = crate::parser::build_dn(root_x509.subject()).to_oneline();
+            let root_depth = parsed.len(); // virtual depth of the trust store root
+
+            // RFC 5280: Check validity dates for the trusted root.
+            if options.check_time {
+                let not_before = root_x509.validity().not_before.timestamp();
+                let not_after = root_x509.validity().not_after.timestamp();
+                if now_ts < not_before {
+                    errors.push(format!("trusted root ({}) is not yet valid", root_subject));
+                }
+                if now_ts > not_after {
+                    errors.push(format!("trusted root ({}) has expired", root_subject));
+                }
+            }
+
+            // Check unknown critical extensions on the trusted root.
+            for ext in root_x509.extensions() {
+                if ext.critical && !is_known_extension(ext.oid.to_id_string().as_str()) {
+                    errors.push(format!(
+                        "trusted root ({}) has unrecognized critical extension {}",
+                        root_subject, ext.oid
+                    ));
+                }
+            }
+
+            // Check Name Constraints from the trusted root against the chain.
+            // Also enforce that NC MUST be critical (RFC 5280 Section 4.2.1.10).
+            for ext in root_x509.extensions() {
+                if ext.oid.to_id_string() == "2.5.29.30" && !ext.critical {
+                    errors.push(format!(
+                        "trusted root ({}) has Name Constraints extension \
+                         that is not marked critical",
+                        root_subject
+                    ));
+                }
+            }
             if let Ok(Some(nc_ext)) = root_x509.name_constraints() {
                 let nc = &nc_ext.value;
-                let root_depth = parsed.len(); // virtual depth of the trust store root
                 for (child_depth, (_, child_cert)) in parsed.iter().enumerate() {
                     let nc_errors = check_name_constraints(nc, child_cert, child_depth, root_depth);
                     errors.extend(nc_errors);
@@ -718,25 +810,30 @@ pub fn verify_chain_with_options(
         }
     }
 
-    // Check hostname against leaf certificate (if requested)
+    // Check hostname against leaf certificate (if requested).
+    // Skip hostname check when the hostname is an IP address that will be
+    // verified via verify_ip instead (avoids false failure from DNS matching).
     if let Some(host) = hostname {
-        let Some((_, leaf)) = parsed.first() else {
-            return Err(XcertError::VerifyError("empty certificate chain".into()));
-        };
-        if !verify_hostname(leaf, host) {
-            let san_names = extract_san_dns_names(leaf);
-            let cn = extract_cn(leaf);
-            let mut names: Vec<String> = san_names;
-            if let Some(cn_val) = cn {
-                if names.is_empty() {
-                    names.push(cn_val);
+        let ip_handled = options.verify_ip.as_deref() == Some(host);
+        if !ip_handled {
+            let Some((_, leaf)) = parsed.first() else {
+                return Err(XcertError::VerifyError("empty certificate chain".into()));
+            };
+            if !verify_hostname(leaf, host) {
+                let san_names = extract_san_dns_names(leaf);
+                let cn = extract_cn(leaf);
+                let mut names: Vec<String> = san_names;
+                if let Some(cn_val) = cn {
+                    if names.is_empty() {
+                        names.push(cn_val);
+                    }
                 }
+                errors.push(format!(
+                    "hostname '{}' does not match certificate names: [{}]",
+                    host,
+                    names.join(", ")
+                ));
             }
-            errors.push(format!(
-                "hostname '{}' does not match certificate names: [{}]",
-                host,
-                names.join(", ")
-            ));
         }
     }
 
@@ -1003,6 +1100,42 @@ fn verify_ip(cert: &X509Certificate, ip: &str) -> bool {
     }
 
     false
+}
+
+// ---------------------------------------------------------------------------
+// Known extension OIDs (for unknown critical extension detection)
+// ---------------------------------------------------------------------------
+
+/// Check if an extension OID is one we recognize and process.
+/// RFC 5280 Section 4.2 requires that implementations reject certificates
+/// containing unrecognized critical extensions.
+fn is_known_extension(oid: &str) -> bool {
+    matches!(
+        oid,
+        // RFC 5280 standard extensions
+        "2.5.29.14" // Subject Key Identifier
+        | "2.5.29.15" // Key Usage
+        | "2.5.29.17" // Subject Alternative Name
+        | "2.5.29.18" // Issuer Alternative Name
+        | "2.5.29.19" // Basic Constraints
+        | "2.5.29.30" // Name Constraints
+        | "2.5.29.31" // CRL Distribution Points
+        | "2.5.29.32" // Certificate Policies
+        | "2.5.29.33" // Policy Mappings
+        | "2.5.29.35" // Authority Key Identifier
+        | "2.5.29.36" // Policy Constraints
+        | "2.5.29.37" // Extended Key Usage
+        | "2.5.29.46" // Freshest CRL
+        | "2.5.29.54" // Inhibit Any Policy
+        // Common extensions in practice
+        | "1.3.6.1.5.5.7.1.1"  // Authority Info Access (AIA)
+        | "1.3.6.1.5.5.7.1.11" // Subject Info Access (SIA)
+        | "1.3.6.1.5.5.7.1.12" // TLS Feature (OCSP Must-Staple)
+        | "1.3.6.1.4.1.11129.2.4.2" // SCT List (Certificate Transparency)
+        | "1.3.6.1.4.1.11129.2.4.3" // CT Poison (pre-certificate)
+        // Netscape extensions (legacy, but still seen)
+        | "2.16.840.1.113730.1.1" // Netscape Cert Type
+    )
 }
 
 // ---------------------------------------------------------------------------

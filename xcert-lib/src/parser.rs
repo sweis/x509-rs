@@ -29,7 +29,10 @@ pub fn parse_pem(input: &[u8]) -> Result<CertificateInfo, XcertError> {
     let (_, pem) = x509_parser::pem::parse_x509_pem(input)
         .map_err(|e| XcertError::PemError(format!("{}", e)))?;
 
-    if pem.label != "CERTIFICATE" && pem.label != "TRUSTED CERTIFICATE" {
+    if pem.label != "CERTIFICATE"
+        && pem.label != "TRUSTED CERTIFICATE"
+        && pem.label != "X509 CERTIFICATE"
+    {
         return Err(XcertError::PemError(format!(
             "expected CERTIFICATE, got {}",
             pem.label
