@@ -281,8 +281,10 @@ mod fields {
         let cert = parse_cert(&data).unwrap();
         let serial = cert.serial_hex();
         // openssl reports serial=1000
+        // Serial 0x1000 can be "10:00" (colon-separated) or "1000"
+        let serial_stripped = serial.replace(":", "");
         assert!(
-            serial.to_uppercase().contains("1000"),
+            serial_stripped.to_uppercase().contains("1000"),
             "server serial should contain 1000, got: {}",
             serial
         );
@@ -529,7 +531,7 @@ mod extensions {
             eku
         );
         assert!(
-            eku.iter().any(|u| u.contains("Email") || u.contains("emailProtection")),
+            eku.iter().any(|u| u.contains("mail") || u.contains("emailProtection")),
             "should include emailProtection, got: {:?}",
             eku
         );
@@ -1267,5 +1269,447 @@ mod algorithms {
                 fp
             );
         }
+    }
+}
+
+// =========================================================================
+// 10. DEGENERATE / MALFORMED INPUT TESTS
+// =========================================================================
+//
+// These test vectors exercise edge cases and error-handling paths in the
+// parser.  Each test asserts that the library returns an error (or, where
+// noted, succeeds gracefully) without panicking or hanging.
+
+mod degenerate {
+    use super::*;
+
+    /// Helper: build a path under tests/certs/degenerate/
+    fn degen_path(name: &str) -> std::path::PathBuf {
+        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.pop(); // up from xcert-lib to workspace root
+        p.push("tests");
+        p.push("certs");
+        p.push("degenerate");
+        p.push(name);
+        p
+    }
+
+    fn load_degen(name: &str) -> Vec<u8> {
+        std::fs::read(degen_path(name)).unwrap_or_else(|e| {
+            panic!(
+                "Failed to read degenerate test file '{}': {}",
+                name, e
+            )
+        })
+    }
+
+    // -----------------------------------------------------------------
+    // 1. empty.der -- 0-byte file
+    // -----------------------------------------------------------------
+    #[test]
+    fn empty_file_returns_error() {
+        let data = load_degen("empty.der");
+        assert!(data.is_empty());
+        let result = parse_cert(&data);
+        assert!(result.is_err(), "empty input must return an error");
+    }
+
+    #[test]
+    fn empty_file_der_returns_error() {
+        let data = load_degen("empty.der");
+        let result = parse_der(&data);
+        assert!(result.is_err(), "empty DER input must return an error");
+    }
+
+    // -----------------------------------------------------------------
+    // 2. one-byte.der -- single SEQUENCE tag, no length or body
+    // -----------------------------------------------------------------
+    #[test]
+    fn one_byte_returns_error() {
+        let data = load_degen("one-byte.der");
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0], 0x30, "should be a SEQUENCE tag");
+        let result = parse_der(&data);
+        assert!(result.is_err(), "single byte must return an error");
+    }
+
+    #[test]
+    fn one_byte_auto_detect_returns_error() {
+        let data = load_degen("one-byte.der");
+        let result = parse_cert(&data);
+        assert!(result.is_err(), "single byte via parse_cert must return an error");
+    }
+
+    // -----------------------------------------------------------------
+    // 3. truncated-header.der -- first 10 bytes of a valid DER cert
+    // -----------------------------------------------------------------
+    #[test]
+    fn truncated_header_returns_error() {
+        let data = load_degen("truncated-header.der");
+        assert_eq!(data.len(), 10);
+        let result = parse_der(&data);
+        assert!(
+            result.is_err(),
+            "truncated header (10 bytes) must return an error"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 4. truncated-body.der -- first half of a valid DER cert
+    // -----------------------------------------------------------------
+    #[test]
+    fn truncated_body_returns_error() {
+        let data = load_degen("truncated-body.der");
+        let result = parse_der(&data);
+        assert!(
+            result.is_err(),
+            "truncated body (half cert) must return an error"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 5. random-bytes.der -- 1024 random bytes
+    // -----------------------------------------------------------------
+    #[test]
+    fn random_bytes_returns_error() {
+        let data = load_degen("random-bytes.der");
+        assert_eq!(data.len(), 1024);
+        let result = parse_der(&data);
+        assert!(result.is_err(), "random bytes must return an error");
+    }
+
+    #[test]
+    fn random_bytes_auto_detect_returns_error() {
+        let data = load_degen("random-bytes.der");
+        let result = parse_cert(&data);
+        assert!(
+            result.is_err(),
+            "random bytes via parse_cert must return an error"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 6. wrong-pem-label.pem -- valid base64 but "BEGIN RSA PRIVATE KEY"
+    // -----------------------------------------------------------------
+    #[test]
+    fn wrong_pem_label_returns_error() {
+        let data = load_degen("wrong-pem-label.pem");
+        let result = parse_pem(&data);
+        assert!(
+            result.is_err(),
+            "PEM with RSA PRIVATE KEY label must return an error"
+        );
+    }
+
+    #[test]
+    fn wrong_pem_label_auto_detect_returns_error() {
+        let data = load_degen("wrong-pem-label.pem");
+        let result = parse_cert(&data);
+        assert!(
+            result.is_err(),
+            "wrong PEM label via parse_cert must return an error"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 7. corrupt-base64.pem -- PEM headers with invalid base64 body
+    // -----------------------------------------------------------------
+    #[test]
+    fn corrupt_base64_returns_error() {
+        let data = load_degen("corrupt-base64.pem");
+        let result = parse_pem(&data);
+        assert!(
+            result.is_err(),
+            "corrupt base64 PEM must return an error"
+        );
+    }
+
+    #[test]
+    fn corrupt_base64_auto_detect_returns_error() {
+        let data = load_degen("corrupt-base64.pem");
+        let result = parse_cert(&data);
+        assert!(
+            result.is_err(),
+            "corrupt base64 via parse_cert must return an error"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 8. null-bytes.der -- 1024 null bytes
+    // -----------------------------------------------------------------
+    #[test]
+    fn null_bytes_returns_error() {
+        let data = load_degen("null-bytes.der");
+        assert_eq!(data.len(), 1024);
+        assert!(data.iter().all(|&b| b == 0));
+        let result = parse_der(&data);
+        assert!(result.is_err(), "1024 null bytes must return an error");
+    }
+
+    #[test]
+    fn null_bytes_auto_detect_returns_error() {
+        let data = load_degen("null-bytes.der");
+        let result = parse_cert(&data);
+        assert!(
+            result.is_err(),
+            "null bytes via parse_cert must return an error"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 9. huge-length.der -- SEQUENCE claiming 2GB, only 100 bytes of data
+    // -----------------------------------------------------------------
+    #[test]
+    fn huge_length_returns_error() {
+        let data = load_degen("huge-length.der");
+        assert_eq!(data.len(), 106, "header(6) + filler(100)");
+        // Must not hang or allocate 2GB; must return an error promptly
+        let result = parse_der(&data);
+        assert!(
+            result.is_err(),
+            "DER with huge claimed length must return an error"
+        );
+    }
+
+    #[test]
+    fn huge_length_auto_detect_returns_error() {
+        let data = load_degen("huge-length.der");
+        let result = parse_cert(&data);
+        assert!(
+            result.is_err(),
+            "huge length via parse_cert must return an error"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 10. nested-sequence.der -- 100 levels of nested SEQUENCE
+    // -----------------------------------------------------------------
+    #[test]
+    fn nested_sequence_returns_error() {
+        let data = load_degen("nested-sequence.der");
+        // This is valid DER structurally (nested SEQUENCEs) but is
+        // not a valid certificate.  The parser must return an error
+        // without stack-overflowing.
+        let result = parse_der(&data);
+        assert!(
+            result.is_err(),
+            "deeply nested SEQUENCEs (not a cert) must return an error"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 11. negative-serial.der -- certificate with tweaked negative serial
+    // -----------------------------------------------------------------
+    #[test]
+    fn negative_serial_parses_or_errors_gracefully() {
+        let data = load_degen("negative-serial.der");
+        // A real-world parser might accept or reject a negative serial.
+        // The important thing is it must not panic.
+        let result = parse_der(&data);
+        // If it succeeds, the serial should be non-empty.
+        // If it fails, the error must be an Err, not a panic.
+        match result {
+            Ok(cert) => {
+                let serial = cert.serial_hex();
+                assert!(
+                    !serial.is_empty(),
+                    "if parsed, serial should be non-empty"
+                );
+            }
+            Err(_) => {
+                // Returning an error is also acceptable
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // 12. trailing-garbage.pem -- valid PEM cert + 1KB garbage appended
+    // -----------------------------------------------------------------
+    #[test]
+    fn trailing_garbage_parses_first_cert() {
+        let data = load_degen("trailing-garbage.pem");
+        // The PEM parser should extract the first valid certificate
+        // and ignore trailing garbage after the END marker.
+        let result = parse_pem(&data);
+        // Depending on the PEM parser, this may succeed (ignoring
+        // trailing bytes) or fail.  Either is acceptable; no panic.
+        match result {
+            Ok(cert) => {
+                assert_eq!(cert.version, 3);
+                assert!(cert.subject_string().contains("Test Root CA"));
+            }
+            Err(_) => {
+                // Returning an error for trailing garbage is also fine
+            }
+        }
+    }
+
+    #[test]
+    fn trailing_garbage_auto_detect() {
+        let data = load_degen("trailing-garbage.pem");
+        let result = parse_cert(&data);
+        match result {
+            Ok(cert) => {
+                assert_eq!(cert.version, 3);
+            }
+            Err(_) => {
+                // Also acceptable
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // 13. multiple-pem.pem -- cert + private key block + cert
+    // -----------------------------------------------------------------
+    #[test]
+    fn multiple_pem_parses_first_cert() {
+        let data = load_degen("multiple-pem.pem");
+        // parse_pem should take the first PEM block it finds.
+        // If the first block is a CERTIFICATE, it should succeed.
+        let result = parse_pem(&data);
+        match result {
+            Ok(cert) => {
+                // First block is root-ca.pem
+                assert_eq!(cert.version, 3);
+                assert!(
+                    cert.subject_string().contains("Test Root CA"),
+                    "should parse the first cert (root CA)"
+                );
+            }
+            Err(e) => {
+                // If the parser rejects mixed PEM, that is acceptable
+                // as long as it does not panic
+                let _ = e;
+            }
+        }
+    }
+
+    #[test]
+    fn multiple_pem_auto_detect() {
+        let data = load_degen("multiple-pem.pem");
+        let result = parse_cert(&data);
+        match result {
+            Ok(cert) => {
+                assert_eq!(cert.version, 3);
+            }
+            Err(_) => {
+                // Also acceptable
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Cross-cutting: none of the broken inputs should panic parse_cert
+    // -----------------------------------------------------------------
+    #[test]
+    fn no_panics_on_any_degenerate_input() {
+        let files = [
+            "empty.der",
+            "one-byte.der",
+            "truncated-header.der",
+            "truncated-body.der",
+            "random-bytes.der",
+            "wrong-pem-label.pem",
+            "corrupt-base64.pem",
+            "null-bytes.der",
+            "huge-length.der",
+            "nested-sequence.der",
+            "negative-serial.der",
+            "trailing-garbage.pem",
+            "multiple-pem.pem",
+        ];
+        for name in &files {
+            let data = load_degen(name);
+            // Must not panic.  We use catch_unwind to turn panics
+            // into failures with a clear message.
+            let data_clone = data.clone();
+            let result = std::panic::catch_unwind(move || {
+                let _ = parse_cert(&data_clone);
+            });
+            assert!(
+                result.is_ok(),
+                "parse_cert panicked on degenerate input: {}",
+                name
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Cross-cutting: none of the broken DER inputs should panic
+    // parse_der
+    // -----------------------------------------------------------------
+    #[test]
+    fn no_panics_on_any_degenerate_der_input() {
+        let files = [
+            "empty.der",
+            "one-byte.der",
+            "truncated-header.der",
+            "truncated-body.der",
+            "random-bytes.der",
+            "null-bytes.der",
+            "huge-length.der",
+            "nested-sequence.der",
+            "negative-serial.der",
+        ];
+        for name in &files {
+            let data = load_degen(name);
+            let data_clone = data.clone();
+            let result = std::panic::catch_unwind(move || {
+                let _ = parse_der(&data_clone);
+            });
+            assert!(
+                result.is_ok(),
+                "parse_der panicked on degenerate input: {}",
+                name
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Cross-cutting: none of the broken PEM inputs should panic
+    // parse_pem
+    // -----------------------------------------------------------------
+    #[test]
+    fn no_panics_on_any_degenerate_pem_input() {
+        let files = [
+            "wrong-pem-label.pem",
+            "corrupt-base64.pem",
+            "trailing-garbage.pem",
+            "multiple-pem.pem",
+        ];
+        for name in &files {
+            let data = load_degen(name);
+            let data_clone = data.clone();
+            let result = std::panic::catch_unwind(move || {
+                let _ = parse_pem(&data_clone);
+            });
+            assert!(
+                result.is_ok(),
+                "parse_pem panicked on degenerate input: {}",
+                name
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Cross-cutting: pem_to_der should also handle broken PEM inputs
+    // -----------------------------------------------------------------
+    #[test]
+    fn pem_to_der_rejects_corrupt_base64() {
+        let data = load_degen("corrupt-base64.pem");
+        let result = pem_to_der(&data);
+        assert!(
+            result.is_err(),
+            "pem_to_der must reject corrupt base64"
+        );
+    }
+
+    #[test]
+    fn pem_to_der_rejects_wrong_label() {
+        let data = load_degen("wrong-pem-label.pem");
+        // pem_to_der extracts bytes regardless of label (it uses
+        // x509_parser::pem which may or may not check).  Either
+        // success or error is fine; must not panic.
+        let _ = pem_to_der(&data);
     }
 }

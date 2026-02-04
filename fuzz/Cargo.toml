@@ -1,0 +1,40 @@
+[package]
+name = "xcert-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+xcert-lib = { path = "../xcert-lib" }
+
+[[bin]]
+name = "parse_cert"
+path = "fuzz_targets/parse_cert.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_der"
+path = "fuzz_targets/parse_der.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_pem"
+path = "fuzz_targets/parse_pem.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "roundtrip"
+path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false

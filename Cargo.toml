@@ -1,3 +1,15 @@
 [workspace]
 members = ["xcert-lib", "xcert"]
+exclude = ["fuzz"]
 resolver = "2"
+
+# Deny unsafe code across the entire workspace
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# Security-relevant lints
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+indexing_slicing = "warn"

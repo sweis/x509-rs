@@ -99,7 +99,7 @@ pub struct Extension {
 
 /// Strongly-typed extension values.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", content = "value")]
 pub enum ExtensionValue {
     BasicConstraints {
         ca: bool,
