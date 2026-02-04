@@ -1,6 +1,21 @@
 # Known Issues
 
-Issues identified during code review. All 35 issues have been fixed.
+## Code Coverage (as of 2026-02-04)
+
+| File | Line Coverage | Notes |
+|------|-------------|-------|
+| check.rs | 96.88% | |
+| convert.rs | 100.00% | |
+| display.rs | 93.85% | |
+| fields.rs | 91.73% | |
+| fingerprint.rs | 100.00% | |
+| parser.rs | 86.12% | Error paths, Ed448, unknown OIDs |
+| util.rs | 98.53% | |
+| verify.rs | 82.18% | Partial chain, CRL edge cases |
+| main.rs | 25.62% | CLI binary; integration tests run externally |
+| **TOTAL** | **69.55%** | Library avg ~91%; main.rs drags total down |
+
+Issues identified during code review. All 39 issues have been fixed.
 
 ## Security / Correctness
 
@@ -288,3 +303,21 @@ shared `is_pem_cert_file()` function, ensuring consistent extension filtering
 `check_leaf_purpose()`, `check_leaf_hostname()`, `check_leaf_email()`,
 `check_leaf_ip()`, and `check_crl_chain()`. Main function reduced from ~460
 lines to ~110 lines.
+
+---
+
+## Round 4: CLI deduplication
+
+### ~~36. main.rs: Duplicate batch result construction~~ FIXED
+
+**Fix:** Added `verify_to_batch()` helper that converts a
+`Result<VerificationResult, E>` into a `BatchResult`, replacing 4
+duplicate match arms in the batch verify closure.
+
+---
+
+### ~~37. main.rs: Duplicate verification result printing~~ FIXED
+
+**Fix:** Added `print_verify_result()` helper that handles JSON output,
+valid/invalid printing, and `--show-chain` display. Replaces 3 duplicate
+print blocks in the single-file verify handler.
