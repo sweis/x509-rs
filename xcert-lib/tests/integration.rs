@@ -6,6 +6,15 @@
 //! These tests exercise the library API against known-good certificates and
 //! compare results to openssl x509 output where applicable.
 
+// Security-audit lints are useful for production code but not for test assertions
+// where expect/unwrap/panic/indexing are standard practice.
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+
 use xcert_lib::*;
 
 // ---------------------------------------------------------------------------
@@ -2748,7 +2757,7 @@ mod reference_vectors {
     fn normalize_serial(openssl_serial: &str) -> String {
         let hex = openssl_serial.trim().to_ascii_uppercase();
         // Pad to even length
-        let hex = if hex.len() % 2 != 0 {
+        let hex = if !hex.len().is_multiple_of(2) {
             format!("0{}", hex)
         } else {
             hex
