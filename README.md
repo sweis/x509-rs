@@ -21,6 +21,8 @@ or create them.
 - **Certificate chain verification** against the system trust store (same CA
   bundle as OpenSSL) or a custom CA file, with hostname matching
 - **Certificate checks** for expiry, hostname, email, and IP matching
+- **Directory batch mode** with parallel processing via [rayon](https://docs.rs/rayon)
+  -- pass a directory instead of a file to `check` or `verify`
 - **SHA-256/384/512/SHA-1** fingerprint computation
 - **RSA, ECDSA (P-256/P-384/P-521), Ed25519** key types
 - **Memory-safe** Rust implementation with `unsafe` code forbidden at the
@@ -170,6 +172,15 @@ if xcert check expiry 7d cert.pem; then
 else
   echo "Certificate expires within 7 days!"
 fi
+
+# Check all certs in a directory (parallel)
+xcert check expiry 30d /etc/ssl/certs/
+
+# Only show failures
+xcert check expiry 7d --failures-only /etc/ssl/certs/
+
+# Recurse into subdirectories
+xcert check expiry 30d -r /opt/certs/
 ```
 
 ### `xcert convert` -- Convert between formats
@@ -233,6 +244,15 @@ xcert verify --json chain.pem
 
 # Read from stdin
 cat chain.pem | xcert verify
+
+# Verify all certs in a directory (parallel)
+xcert verify --CAfile ca.pem /etc/ssl/certs/
+
+# Only show failures
+xcert verify --failures-only /etc/ssl/certs/
+
+# Recurse into subdirectories
+xcert verify -r /opt/certs/
 ```
 
 Exit code 0 means verification passed, exit code 2 means verification failed.
