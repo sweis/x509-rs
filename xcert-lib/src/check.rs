@@ -13,7 +13,7 @@ pub fn check_expiry(cert: &CertificateInfo, seconds: u64) -> bool {
         .unwrap_or_default()
         .as_secs();
 
-    let deadline = now + seconds;
+    let deadline = now.saturating_add(seconds);
     let not_after = cert.not_after.timestamp;
 
     if not_after < 0 {

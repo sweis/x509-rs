@@ -5,6 +5,7 @@ use crate::fields::{
     PublicKeyInfo, SanEntry,
 };
 use crate::XcertError;
+use base64::Engine;
 use x509_parser::der_parser::asn1_rs;
 use x509_parser::prelude::*;
 
@@ -48,10 +49,14 @@ pub fn parse_pem(input: &[u8]) -> Result<CertificateInfo, XcertError> {
 
 /// Parse a certificate from DER format.
 pub fn parse_der(input: &[u8]) -> Result<CertificateInfo, XcertError> {
-    let (_, x509) = X509Certificate::from_der(input)
+    let (remaining, x509) = X509Certificate::from_der(input)
         .map_err(|e| XcertError::DerError(format!("{}", e)))?;
 
-    build_certificate_info(&x509, input)
+    // Use only the actual certificate bytes, not any trailing data,
+    // so that fingerprints are computed over the correct content.
+    let cert_len = input.len() - remaining.len();
+    let cert_der = input.get(..cert_len).unwrap_or(input);
+    build_certificate_info(&x509, cert_der)
 }
 
 /// Build a CertificateInfo from a parsed X509Certificate.
@@ -126,7 +131,7 @@ fn build_dn(name: &X509Name) -> DistinguishedName {
     let mut components = Vec::new();
     for rdn in name.iter() {
         for attr in rdn.iter() {
-            let key = oid_to_short_name(&attr.attr_type());
+            let key = oid_to_short_name(attr.attr_type());
             let value = attr.as_str().unwrap_or("<binary>").to_string();
             components.push((key, value));
         }
@@ -275,58 +280,69 @@ fn extract_ec_curve(algo: &AlgorithmIdentifier) -> String {
 }
 
 fn build_spki_pem(spki: &SubjectPublicKeyInfo) -> String {
-    let algo_der = serialize_algorithm(&spki.algorithm);
+    use asn1_rs::ToDer;
+
+    // Encode AlgorithmIdentifier SEQUENCE from its fields.
+    // Using ToDer on the OID and parameters ensures correct TLV encoding,
+    // including proper tag+length on parameters (fixing a prior bug where
+    // only the value bytes were emitted).
+    let oid_der = spki.algorithm.algorithm.to_der_vec().unwrap_or_default();
+    let params_der = match &spki.algorithm.parameters {
+        Some(any) => any.to_der_vec().unwrap_or_else(|_| vec![0x05, 0x00]),
+        None => vec![0x05, 0x00], // explicit NULL
+    };
+    let algo_body_len = oid_der.len() + params_der.len();
+
     let key_data = &spki.subject_public_key.data;
+    let bitstring_content_len = 1 + key_data.len(); // 0x00 unused-bits + key
 
-    let mut bitstring_inner = Vec::new();
-    bitstring_inner.push(0x00); // unused bits
-    bitstring_inner.extend_from_slice(&key_data);
+    // AlgorithmIdentifier SEQUENCE length
+    let algo_total_len = 1 + der_length_size(algo_body_len) + algo_body_len;
+    // BIT STRING total length
+    let bitstring_total_len = 1 + der_length_size(bitstring_content_len) + bitstring_content_len;
+    // Outer SEQUENCE body
+    let spki_body_len = algo_total_len + bitstring_total_len;
 
-    let mut spki_body = Vec::new();
-    spki_body.extend_from_slice(&algo_der);
-    spki_body.push(0x03); // BIT STRING tag
-    write_der_length(&mut spki_body, bitstring_inner.len());
-    spki_body.extend_from_slice(&bitstring_inner);
-
-    let mut spki_der = Vec::new();
-    spki_der.push(0x30); // SEQUENCE tag
-    write_der_length(&mut spki_der, spki_body.len());
-    spki_der.extend_from_slice(&spki_body);
+    let mut spki_der = Vec::with_capacity(1 + der_length_size(spki_body_len) + spki_body_len);
+    // Outer SEQUENCE
+    spki_der.push(0x30);
+    push_der_length(&mut spki_der, spki_body_len);
+    // AlgorithmIdentifier SEQUENCE
+    spki_der.push(0x30);
+    push_der_length(&mut spki_der, algo_body_len);
+    spki_der.extend_from_slice(&oid_der);
+    spki_der.extend_from_slice(&params_der);
+    // BIT STRING
+    spki_der.push(0x03);
+    push_der_length(&mut spki_der, bitstring_content_len);
+    spki_der.push(0x00); // unused bits
+    spki_der.extend_from_slice(key_data);
 
     format!(
         "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n",
-        base64_encode_wrapped(&spki_der)
+        base64_encode_pem(&spki_der)
     )
 }
 
-fn serialize_algorithm(algo: &AlgorithmIdentifier) -> Vec<u8> {
-    let oid_der = encode_oid(&algo.algorithm);
-    let params_der = match &algo.parameters {
-        Some(any) => any.data.to_vec(),
-        None => vec![0x05, 0x00],
-    };
-
-    let mut body = Vec::new();
-    body.extend_from_slice(&oid_der);
-    body.extend_from_slice(&params_der);
-
-    let mut result = Vec::new();
-    result.push(0x30);
-    write_der_length(&mut result, body.len());
-    result.extend_from_slice(&body);
-    result
+/// Encode bytes as base64 with PEM-style 64-character line wrapping.
+fn base64_encode_pem(data: &[u8]) -> String {
+    let encoded = base64::engine::general_purpose::STANDARD.encode(data);
+    encoded
+        .as_bytes()
+        .chunks(64)
+        .filter_map(|c| std::str::from_utf8(c).ok())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-fn encode_oid(oid: &asn1_rs::Oid) -> Vec<u8> {
-    let raw = oid.as_bytes();
-    let mut result = Vec::new();
-    result.push(0x06);
-    write_der_length(&mut result, raw.len());
-    result.extend_from_slice(raw);
-    result
+fn der_length_size(len: usize) -> usize {
+    if len < 0x80 { 1 }
+    else if len < 0x100 { 2 }
+    else if len < 0x10000 { 3 }
+    else { 4 }
 }
 
-fn write_der_length(buf: &mut Vec<u8>, len: usize) {
+fn push_der_length(buf: &mut Vec<u8>, len: usize) {
     if len < 0x80 {
         buf.push(len as u8);
     } else if len < 0x100 {
@@ -342,37 +358,6 @@ fn write_der_length(buf: &mut Vec<u8>, len: usize) {
         buf.push((len >> 8) as u8);
         buf.push(len as u8);
     }
-}
-
-fn base64_encode_wrapped(data: &[u8]) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::new();
-    let mut line_len = 0;
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-
-        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
-        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
-        if chunk.len() > 1 {
-            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
-        }
-        if chunk.len() > 2 {
-            result.push(CHARS[(triple & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
-        }
-        line_len += 4;
-        if line_len >= 64 {
-            result.push('\n');
-            line_len = 0;
-        }
-    }
-    result
 }
 
 fn build_extensions(
@@ -600,15 +585,15 @@ fn format_general_name(gn: &GeneralName) -> String {
 }
 
 fn format_ip_bytes(bytes: &[u8]) -> String {
-    match bytes.len() {
-        4 => format!("{}.{}.{}.{}", bytes[0], bytes[1], bytes[2], bytes[3]),
-        16 => {
-            let mut parts = Vec::new();
-            for chunk in bytes.chunks(2) {
-                parts.push(format!("{:x}", (chunk[0] as u16) << 8 | chunk[1] as u16));
-            }
-            parts.join(":")
-        }
-        _ => hex::encode(bytes),
+    if let [a, b, c, d] = *bytes {
+        format!("{}.{}.{}.{}", a, b, c, d)
+    } else if bytes.len() == 16 {
+        bytes
+            .chunks_exact(2)
+            .filter_map(|c| Some(format!("{:x}", (*c.first()? as u16) << 8 | *c.get(1)? as u16)))
+            .collect::<Vec<_>>()
+            .join(":")
+    } else {
+        hex::encode(bytes)
     }
 }

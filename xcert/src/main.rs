@@ -270,26 +270,35 @@ fn main() -> Result<()> {
             pem,
         } => {
             let input = read_input(file.as_ref())?;
+
+            let is_pem_input = if *pem {
+                true
+            } else if *der {
+                false
+            } else {
+                // auto-detect
+                let trimmed: Vec<u8> = input
+                    .iter()
+                    .skip_while(|b| b.is_ascii_whitespace())
+                    .take(11)
+                    .copied()
+                    .collect();
+                trimmed.starts_with(b"-----BEGIN")
+            };
+
             let output_bytes: Vec<u8> = match to.as_str() {
-                "der" => xcert_lib::pem_to_der(&input)?,
-                "pem" => {
-                    let der_input = if *pem {
+                "der" => {
+                    if is_pem_input {
                         xcert_lib::pem_to_der(&input)?
-                    } else if *der {
-                        input
                     } else {
-                        // auto-detect
-                        let trimmed = input
-                            .iter()
-                            .skip_while(|b| b.is_ascii_whitespace())
-                            .take(11)
-                            .copied()
-                            .collect::<Vec<_>>();
-                        if trimmed.starts_with(b"-----BEGIN") {
-                            xcert_lib::pem_to_der(&input)?
-                        } else {
-                            input
-                        }
+                        input
+                    }
+                }
+                "pem" => {
+                    let der_input = if is_pem_input {
+                        xcert_lib::pem_to_der(&input)?
+                    } else {
+                        input
                     };
                     xcert_lib::der_to_pem(&der_input).into_bytes()
                 }
