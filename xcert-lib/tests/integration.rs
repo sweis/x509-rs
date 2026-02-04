@@ -2170,8 +2170,8 @@ mod cross_compat_openssl {
     fn ossl_rsa_root_ca() {
         let cert = parse_external_pem("ossl-root-cert.pem");
         assert_eq!(cert.version, 3);
-        assert!(cert.subject_string().contains("CN=Root CA"));
-        assert!(cert.issuer_string().contains("CN=Root CA"));
+        assert!(cert.subject_string().contains("CN = Root CA"));
+        assert!(cert.issuer_string().contains("CN = Root CA"));
         assert_eq!(cert.serial, "01");
         assert_eq!(cert.public_key.algorithm, "RSA");
         assert_eq!(cert.public_key.key_size, Some(2048));
@@ -2193,8 +2193,8 @@ mod cross_compat_openssl {
     fn ossl_ecdsa_p256() {
         let cert = parse_external_pem("ossl-server-ecdsa-cert.pem");
         assert_eq!(cert.version, 3);
-        assert!(cert.subject_string().contains("CN=Server ECDSA cert"));
-        assert!(cert.issuer_string().contains("CN=Root CA"));
+        assert!(cert.subject_string().contains("CN = Server ECDSA cert"));
+        assert!(cert.issuer_string().contains("CN = Root CA"));
         assert_eq!(cert.public_key.algorithm, "EC");
         assert_eq!(cert.public_key.key_size, Some(256));
         assert_eq!(cert.public_key.curve.as_deref(), Some("P-256"));
@@ -2219,8 +2219,8 @@ HXYERwfGfOm52BUdgDhovkPkm6VgYXMvQtDlDnkakK5vVXaP4CHIEwo9Cg==
     fn ossl_ed25519() {
         let cert = parse_external_pem("ossl-root-ed25519.pem");
         assert_eq!(cert.version, 3);
-        assert!(cert.subject_string().contains("CN=IETF Test Demo"));
-        assert!(cert.issuer_string().contains("CN=IETF Test Demo"));
+        assert!(cert.subject_string().contains("CN = IETF Test Demo"));
+        assert!(cert.issuer_string().contains("CN = IETF Test Demo"));
         assert_eq!(cert.serial, "84:F1:08:3D:1C:E3:2D:95");
         assert_eq!(cert.public_key.algorithm, "Ed25519");
         assert_eq!(cert.public_key.key_size, Some(256));
@@ -2244,7 +2244,7 @@ MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
     fn ossl_ed448() {
         let cert = parse_external_pem("ossl-root-ed448-cert.pem");
         assert_eq!(cert.version, 3);
-        assert!(cert.subject_string().contains("CN=Root Ed448"));
+        assert!(cert.subject_string().contains("CN = Root Ed448"));
         assert_eq!(cert.public_key.algorithm, "Ed448");
         assert_eq!(cert.public_key.key_size, Some(448));
         assert_eq!(
@@ -2268,7 +2268,7 @@ qWSt4EIbHpqDc+eWoiKbG6t7tjUA
     fn ossl_many_names_parses_without_panic() {
         let cert = parse_external_pem("ossl-many-names1.pem");
         assert_eq!(cert.version, 3);
-        assert!(cert.subject_string().contains("CN=t0.test"));
+        assert!(cert.subject_string().contains("CN = t0.test"));
         // This cert has 513 emailAddress attributes in the subject
         let email_count = cert
             .subject
@@ -2296,7 +2296,7 @@ mod cross_compat_pyca {
     fn pyca_ecdsa_p384_root() {
         let cert = parse_external_pem("pyca-ecdsa-root.pem");
         assert_eq!(cert.version, 3);
-        assert!(cert.subject_string().contains("CN=DigiCert Global Root G3"));
+        assert!(cert.subject_string().contains("CN = DigiCert Global Root G3"));
         assert_eq!(cert.public_key.algorithm, "EC");
         assert_eq!(cert.public_key.key_size, Some(384));
         assert_eq!(cert.public_key.curve.as_deref(), Some("P-384"));
@@ -2322,8 +2322,8 @@ Q+4QE2xy3q6Ip6FrtUPOZ9wj/wMco+I+
     fn pyca_letsencrypt_x3() {
         let cert = parse_external_pem("pyca-letsencrypt-x3.pem");
         assert_eq!(cert.version, 3);
-        assert!(cert.subject_string().contains("CN=Let's Encrypt Authority X3"));
-        assert!(cert.issuer_string().contains("CN=DST Root CA X3"));
+        assert!(cert.subject_string().contains("CN = Let's Encrypt Authority X3"));
+        assert!(cert.issuer_string().contains("CN = DST Root CA X3"));
         assert_eq!(cert.public_key.algorithm, "RSA");
         assert_eq!(cert.public_key.key_size, Some(2048));
         assert_eq!(
@@ -2336,8 +2336,8 @@ Q+4QE2xy3q6Ip6FrtUPOZ9wj/wMco+I+
     fn pyca_v1_cert() {
         let cert = parse_external_pem("pyca-v1.pem");
         assert_eq!(cert.version, 1);
-        assert!(cert.subject_string().contains("CN=SSLeay/rsa test cert"));
-        assert!(cert.issuer_string().contains("CN=SSLeay/rsa test CA"));
+        assert!(cert.subject_string().contains("CN = SSLeay/rsa test cert"));
+        assert!(cert.issuer_string().contains("CN = SSLeay/rsa test CA"));
         assert_eq!(cert.public_key.algorithm, "RSA");
         assert_eq!(cert.public_key.key_size, Some(512));
         assert_eq!(
@@ -2352,7 +2352,7 @@ Q+4QE2xy3q6Ip6FrtUPOZ9wj/wMco+I+
     fn pyca_wildcard_san() {
         let cert = parse_external_pem("pyca-wildcard-san.pem");
         assert_eq!(cert.version, 3);
-        assert!(cert.subject_string().contains("CN=*.langui.sh"));
+        assert!(cert.subject_string().contains("CN = *.langui.sh"));
         assert_eq!(cert.public_key.algorithm, "RSA");
         assert_eq!(cert.public_key.key_size, Some(4096));
         assert_eq!(
@@ -2390,7 +2390,7 @@ Q+4QE2xy3q6Ip6FrtUPOZ9wj/wMco+I+
     fn pyca_dsa_selfsigned() {
         let cert = parse_external_pem("pyca-dsa-selfsigned.pem");
         assert_eq!(cert.version, 3);
-        assert!(cert.subject_string().contains("CN=PyCA DSA CA"));
+        assert!(cert.subject_string().contains("CN = PyCA DSA CA"));
         // DSA is not one of our named algorithms so it falls back to OID
         assert!(
             cert.public_key.algorithm == "DSA"
@@ -2425,8 +2425,8 @@ mod cross_compat_x509_parser {
     fn x509p_certificate_pem() {
         let cert = parse_external_pem("x509p-certificate.pem");
         assert_eq!(cert.version, 3);
-        assert!(cert.subject_string().contains("CN=lists.for-our.info"));
-        assert!(cert.issuer_string().contains("CN=Let's Encrypt Authority X3"));
+        assert!(cert.subject_string().contains("CN = lists.for-our.info"));
+        assert!(cert.issuer_string().contains("CN = Let's Encrypt Authority X3"));
         assert_eq!(cert.public_key.algorithm, "RSA");
         assert_eq!(cert.public_key.key_size, Some(2048));
         assert_eq!(
@@ -2440,10 +2440,10 @@ mod cross_compat_x509_parser {
         let cert = parse_external_pem("x509p-IGC_A.pem");
         assert_eq!(cert.version, 3);
         // French government root CA with rich DN
-        assert!(cert.subject_string().contains("CN=IGC/A"));
-        assert!(cert.subject_string().contains("C=FR"));
-        assert!(cert.subject_string().contains("O=PM/SGDN"));
-        assert!(cert.subject_string().contains("OU=DCSSI"));
+        assert!(cert.subject_string().contains("CN = IGC/A"));
+        assert!(cert.subject_string().contains("C = FR"));
+        assert!(cert.subject_string().contains("O = PM/SGDN"));
+        assert!(cert.subject_string().contains("OU = DCSSI"));
         // Self-signed
         assert_eq!(cert.subject_string(), cert.issuer_string());
         assert_eq!(cert.public_key.algorithm, "RSA");
@@ -2468,7 +2468,7 @@ mod cross_compat_x509_parser {
     #[test]
     fn x509p_no_extensions() {
         let cert = parse_external_pem("x509p-no_extensions.pem");
-        assert!(cert.subject_string().contains("CN=benno"));
+        assert!(cert.subject_string().contains("CN = benno"));
         assert_eq!(cert.public_key.algorithm, "EC");
         assert_eq!(cert.public_key.key_size, Some(384));
         assert!(cert.extensions.is_empty());
@@ -2491,8 +2491,8 @@ mod cross_compat_x509_parser {
     #[test]
     fn x509p_ed25519_der() {
         let cert = parse_external_der("x509p-ed25519.der");
-        assert!(cert.subject_string().contains("CN=www.example.com"));
-        assert!(cert.subject_string().contains("C=DE"));
+        assert!(cert.subject_string().contains("CN = www.example.com"));
+        assert!(cert.subject_string().contains("C = DE"));
         assert_eq!(cert.public_key.algorithm, "Ed25519");
         assert_eq!(cert.public_key.key_size, Some(256));
         assert_eq!(
@@ -2505,7 +2505,7 @@ mod cross_compat_x509_parser {
     fn x509p_v1_cert() {
         let cert = parse_external_der("x509p-v1.der");
         assert_eq!(cert.version, 1);
-        assert!(cert.subject_string().contains("CN=marquee"));
+        assert!(cert.subject_string().contains("CN = marquee"));
         assert_eq!(cert.public_key.algorithm, "RSA");
         assert!(cert.extensions.is_empty());
         assert_eq!(

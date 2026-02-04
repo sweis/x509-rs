@@ -159,10 +159,10 @@ fn build_public_key_info(
 ) -> Result<PublicKeyInfo, XcertError> {
     let oid_str = spki.algorithm.algorithm.to_id_string();
 
-    let (algorithm, key_size, curve, modulus) = match oid_str.as_str() {
+    let (algorithm, key_size, curve, modulus, exponent) = match oid_str.as_str() {
         "1.2.840.113549.1.1.1" => {
-            let (mod_hex, bits) = extract_rsa_modulus(&spki.subject_public_key.data);
-            ("RSA".into(), Some(bits), None, Some(mod_hex))
+            let (mod_hex, bits, exp) = extract_rsa_params(&spki.subject_public_key.data);
+            ("RSA".into(), Some(bits), None, Some(mod_hex), Some(exp))
         }
         "1.2.840.10045.2.1" => {
             let curve_name = extract_ec_curve(&spki.algorithm);
@@ -172,11 +172,11 @@ fn build_public_key_info(
                 "P-521" => Some(521),
                 _ => None,
             };
-            ("EC".into(), key_size, Some(curve_name), None)
+            ("EC".into(), key_size, Some(curve_name), None, None)
         }
-        "1.3.101.112" => ("Ed25519".into(), Some(256), None, None),
-        "1.3.101.113" => ("Ed448".into(), Some(448), None, None),
-        _ => (oid_str, None, None, None),
+        "1.3.101.112" => ("Ed25519".into(), Some(256), None, None, None),
+        "1.3.101.113" => ("Ed448".into(), Some(448), None, None, None),
+        _ => (oid_str, None, None, None, None),
     };
 
     let pem = build_spki_pem(spki);
@@ -186,30 +186,33 @@ fn build_public_key_info(
         key_size,
         curve,
         modulus,
+        exponent,
         pem,
     })
 }
 
-/// Extract RSA modulus from raw public key DER.
-fn extract_rsa_modulus(data: &[u8]) -> (String, u32) {
+/// Extract RSA modulus and exponent from raw public key DER.
+fn extract_rsa_params(data: &[u8]) -> (String, u32, u64) {
     if let Ok((_, parsed)) = x509_parser::der_parser::parse_der(data) {
         if let Ok(seq) = parsed.as_sequence() {
-            if let Some(modulus_obj) = seq.first() {
-                if let Ok(bigint) = modulus_obj.as_bigint() {
-                    let bytes = bigint.to_bytes_be().1;
-                    // Skip leading zero byte used for DER positive integer encoding
-                    let significant = match bytes.split_first() {
-                        Some((&0, rest)) if !rest.is_empty() => rest,
-                        _ => &bytes,
-                    };
-                    let bits = (significant.len() as u32) * 8;
-                    return (hex::encode_upper(significant), bits);
-                }
+            let mod_result = seq.first().and_then(|m| m.as_bigint().ok());
+            let exp_result = seq.get(1).and_then(|e| e.as_u64().ok());
+
+            if let Some(bigint) = mod_result {
+                let bytes = bigint.to_bytes_be().1;
+                // Skip leading zero byte used for DER positive integer encoding
+                let significant = match bytes.split_first() {
+                    Some((&0, rest)) if !rest.is_empty() => rest,
+                    _ => &bytes,
+                };
+                let bits = (significant.len() as u32) * 8;
+                let exponent = exp_result.unwrap_or(65537);
+                return (hex::encode_upper(significant), bits, exponent);
             }
         }
     }
     let bits = (data.len() as u32) * 8;
-    (hex::encode_upper(data), bits)
+    (hex::encode_upper(data), bits, 65537)
 }
 
 fn extract_ec_curve(algo: &AlgorithmIdentifier) -> String {
@@ -503,11 +506,18 @@ fn format_general_name(gn: &GeneralName) -> String {
     }
 }
 
-fn format_ip_bytes(bytes: &[u8]) -> String {
+pub(crate) fn format_ip_bytes(bytes: &[u8]) -> String {
     if let Ok(octets) = <[u8; 4]>::try_from(bytes) {
         std::net::Ipv4Addr::from(octets).to_string()
     } else if let Ok(octets) = <[u8; 16]>::try_from(bytes) {
-        std::net::Ipv6Addr::from(octets).to_string()
+        // Use OpenSSL-compatible format: uppercase hex segments without ::
+        // compression (e.g., "2606:2800:0220:0001:0248:1893:25C8:1946")
+        let addr = std::net::Ipv6Addr::from(octets);
+        let segs = addr.segments();
+        segs.iter()
+            .map(|s| format!("{:X}", s))
+            .collect::<Vec<_>>()
+            .join(":")
     } else {
         hex::encode(bytes)
     }

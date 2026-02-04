@@ -98,7 +98,7 @@ pub fn check_ip(cert: &CertificateInfo, ip: &str) -> bool {
     false
 }
 
-fn normalize_ip(ip: &str) -> String {
+pub(crate) fn normalize_ip(ip: &str) -> String {
     if let Ok(addr) = ip.parse::<std::net::Ipv4Addr>() {
         return addr.to_string();
     }

@@ -33,6 +33,10 @@ pub fn display_text(cert: &CertificateInfo, show_all: bool) -> String {
     }
     out.push('\n');
 
+    if let Some(exp) = cert.public_key.exponent {
+        let _ = writeln!(out, "    Exponent: {} (0x{:x})", exp, exp);
+    }
+
     if show_all {
         if let Some(modulus) = &cert.public_key.modulus {
             let truncated = modulus.get(..40).unwrap_or(modulus);

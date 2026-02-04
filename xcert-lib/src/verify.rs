@@ -76,6 +76,15 @@ pub struct VerifyOptions {
     /// "1.3.6.1.5.5.7.3.1" for serverAuth). If set, verification fails when
     /// the leaf's EKU extension is present but does not include this OID.
     pub purpose: Option<String>,
+    /// Verify at a specific Unix timestamp instead of the current time.
+    /// Matches OpenSSL's `-attime` flag.
+    pub at_time: Option<i64>,
+    /// Maximum chain depth. Defaults to 32.
+    pub verify_depth: Option<usize>,
+    /// Email to verify against the leaf certificate's SAN/subject.
+    pub verify_email: Option<String>,
+    /// IP address to verify against the leaf certificate's SAN.
+    pub verify_ip: Option<String>,
 }
 
 impl Default for VerifyOptions {
@@ -84,7 +93,27 @@ impl Default for VerifyOptions {
             check_time: true,
             partial_chain: false,
             purpose: None,
+            at_time: None,
+            verify_depth: None,
+            verify_email: None,
+            verify_ip: None,
         }
+    }
+}
+
+/// Resolve a named purpose string to its EKU OID.
+///
+/// Matches OpenSSL's `-purpose` named values.
+pub fn resolve_purpose(name: &str) -> Option<&'static str> {
+    match name {
+        "sslserver" => Some("1.3.6.1.5.5.7.3.1"),
+        "sslclient" => Some("1.3.6.1.5.5.7.3.2"),
+        "smimesign" | "smimeencrypt" => Some("1.3.6.1.5.5.7.3.4"),
+        "codesign" => Some("1.3.6.1.5.5.7.3.3"),
+        "timestampsign" => Some("1.3.6.1.5.5.7.3.8"),
+        "ocsphelper" => Some("1.3.6.1.5.5.7.3.9"),
+        "any" => Some("2.5.29.37.0"),
+        _ => None,
     }
 }
 
@@ -244,6 +273,35 @@ impl TrustStore {
         Ok(added)
     }
 
+    /// Load certificates from a directory of PEM files (like OpenSSL's -CApath).
+    ///
+    /// Reads all `.pem`, `.crt`, and `.0`-`.9` files in the directory.
+    pub fn add_pem_directory(&mut self, dir: &std::path::Path) -> Result<usize, XcertError> {
+        let mut total = 0;
+        let entries = std::fs::read_dir(dir).map_err(|e| {
+            XcertError::Io(std::io::Error::new(e.kind(), format!("{}: {}", dir.display(), e)))
+        })?;
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let is_cert_file = name.ends_with(".pem")
+                    || name.ends_with(".crt")
+                    || name.ends_with(".cer")
+                    || name.chars().last().is_some_and(|c| c.is_ascii_digit());
+                if is_cert_file {
+                    if let Ok(data) = std::fs::read(&path) {
+                        if let Ok(added) = self.add_pem_bundle(&data) {
+                            total += added;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(total)
+    }
+
     /// Find trusted certificates whose subject matches the given issuer name.
     fn find_by_subject_raw(&self, subject_raw: &[u8]) -> Option<&Vec<Vec<u8>>> {
         self.certs_by_subject.get(subject_raw)
@@ -350,20 +408,23 @@ pub fn verify_chain_with_options(
         return Err(XcertError::VerifyError("empty certificate chain".into()));
     }
 
-    if chain_der.len() > MAX_CHAIN_DEPTH {
+    let max_depth = options.verify_depth.unwrap_or(MAX_CHAIN_DEPTH);
+    if chain_der.len() > max_depth {
         return Err(XcertError::VerifyError(format!(
             "certificate chain exceeds maximum depth of {}",
-            MAX_CHAIN_DEPTH
+            max_depth
         )));
     }
 
     let mut errors = Vec::new();
     let mut chain_info = Vec::new();
 
-    let now_ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
+    let now_ts = options.at_time.unwrap_or_else(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64
+    });
 
     // Parse all certificates in the chain
     let parsed: Vec<(&[u8], X509Certificate)> = chain_der
@@ -602,6 +663,28 @@ pub fn verify_chain_with_options(
         }
     }
 
+    // Check email against leaf certificate SAN/subject (if requested)
+    if let Some(ref email) = options.verify_email {
+        let (_, leaf) = &parsed[0];
+        if !verify_email(leaf, email) {
+            errors.push(format!(
+                "email '{}' does not match certificate",
+                email
+            ));
+        }
+    }
+
+    // Check IP address against leaf certificate SAN (if requested)
+    if let Some(ref ip) = options.verify_ip {
+        let (_, leaf) = &parsed[0];
+        if !verify_ip(leaf, ip) {
+            errors.push(format!(
+                "IP address '{}' does not match certificate",
+                ip
+            ));
+        }
+    }
+
     Ok(VerificationResult {
         is_valid: errors.is_empty(),
         chain: chain_info,
@@ -759,5 +842,54 @@ fn extract_cn(cert: &X509Certificate) -> Option<String> {
         }
     }
     None
+}
+
+/// Verify that an email matches the leaf certificate's SAN email entries or
+/// subject emailAddress attribute.
+fn verify_email(cert: &X509Certificate, email: &str) -> bool {
+    let email_lower = email.to_ascii_lowercase();
+
+    if let Ok(Some(san)) = cert.subject_alternative_name() {
+        for gn in &san.value.general_names {
+            if let GeneralName::RFC822Name(san_email) = gn {
+                if san_email.to_ascii_lowercase() == email_lower {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Fall back to subject emailAddress (OID 1.2.840.113549.1.9.1)
+    for rdn in cert.subject().iter() {
+        for attr in rdn.iter() {
+            if format!("{}", attr.attr_type()) == "1.2.840.113549.1.9.1" {
+                if let Ok(val) = attr.as_str() {
+                    if val.to_ascii_lowercase() == email_lower {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Verify that an IP address matches the leaf certificate's SAN IP entries.
+fn verify_ip(cert: &X509Certificate, ip: &str) -> bool {
+    let normalized = crate::check::normalize_ip(ip);
+
+    if let Ok(Some(san)) = cert.subject_alternative_name() {
+        for gn in &san.value.general_names {
+            if let GeneralName::IPAddress(ip_bytes) = gn {
+                let san_ip = crate::parser::format_ip_bytes(ip_bytes);
+                if crate::check::normalize_ip(&san_ip) == normalized {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 

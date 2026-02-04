@@ -50,12 +50,12 @@ pub struct DistinguishedName {
 }
 
 impl DistinguishedName {
-    /// Format as a comma-separated one-line string.
-    /// Example: "CN=example.com, O=Org, C=US"
+    /// Format as a comma-separated one-line string matching OpenSSL's default format.
+    /// Example: "C = US, O = Org, CN = example.com"
     pub fn to_oneline(&self) -> String {
         self.components
             .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
+            .map(|(k, v)| format!("{} = {}", k, v))
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -79,6 +79,9 @@ pub struct PublicKeyInfo {
     /// RSA modulus as hex string (only for RSA keys).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modulus: Option<String>,
+    /// RSA exponent (only for RSA keys, typically 65537).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exponent: Option<u64>,
     /// PEM-encoded SubjectPublicKeyInfo.
     #[serde(skip)]
     pub pem: String,
@@ -151,9 +154,44 @@ pub struct DateTime {
     pub timestamp: i64,
 }
 
+impl DateTime {
+    /// Format in OpenSSL's default date style: `Feb  3 23:57:06 2026 GMT`.
+    pub fn to_openssl(&self) -> String {
+        match ::time::OffsetDateTime::from_unix_timestamp(self.timestamp) {
+            Ok(dt) => {
+                let month = match u8::from(dt.month()) {
+                    1 => "Jan",
+                    2 => "Feb",
+                    3 => "Mar",
+                    4 => "Apr",
+                    5 => "May",
+                    6 => "Jun",
+                    7 => "Jul",
+                    8 => "Aug",
+                    9 => "Sep",
+                    10 => "Oct",
+                    11 => "Nov",
+                    12 => "Dec",
+                    _ => "???",
+                };
+                format!(
+                    "{} {:2} {:02}:{:02}:{:02} {} GMT",
+                    month,
+                    dt.day(),
+                    dt.hour(),
+                    dt.minute(),
+                    dt.second(),
+                    dt.year()
+                )
+            }
+            Err(_) => self.iso8601.clone(),
+        }
+    }
+}
+
 impl std::fmt::Display for DateTime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.iso8601)
+        write!(f, "{}", self.to_openssl())
     }
 }
 
@@ -168,19 +206,24 @@ impl CertificateInfo {
         self.issuer.to_oneline()
     }
 
-    /// Return the serial number as a hex string.
+    /// Return the serial number as a colon-separated hex string (e.g., "10:00").
     pub fn serial_hex(&self) -> &str {
         &self.serial
     }
 
-    /// Return the notBefore date as a string.
-    pub fn not_before_string(&self) -> String {
-        self.not_before.iso8601.clone()
+    /// Return the serial number in compact hex format matching OpenSSL output (e.g., "1000").
+    pub fn serial_compact(&self) -> String {
+        self.serial.replace(':', "")
     }
 
-    /// Return the notAfter date as a string.
+    /// Return the notBefore date as a string (OpenSSL format).
+    pub fn not_before_string(&self) -> String {
+        self.not_before.to_openssl()
+    }
+
+    /// Return the notAfter date as a string (OpenSSL format).
     pub fn not_after_string(&self) -> String {
-        self.not_after.iso8601.clone()
+        self.not_after.to_openssl()
     }
 
     /// Compute the fingerprint of the certificate using the given digest algorithm.

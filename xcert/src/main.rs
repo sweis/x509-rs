@@ -46,6 +46,9 @@ enum Commands {
         /// Hash algorithm for fingerprint
         #[arg(long, default_value = "sha256")]
         digest: String,
+        /// Extension name filter (e.g., "subjectAltName", "keyUsage")
+        #[arg(long)]
+        ext: Option<String>,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -93,6 +96,9 @@ enum Commands {
         /// PEM file containing trusted CA certificates (default: system trust store)
         #[arg(long = "CAfile", visible_alias = "ca-file", value_name = "FILE")]
         ca_file: Option<PathBuf>,
+        /// Directory of trusted CA certificates in PEM format
+        #[arg(long = "CApath", visible_alias = "ca-path", value_name = "DIR")]
+        ca_path: Option<PathBuf>,
         /// PEM file with untrusted intermediate certificates
         #[arg(long)]
         untrusted: Option<PathBuf>,
@@ -102,9 +108,24 @@ enum Commands {
         /// Allow partial chain verification (trust any cert in the chain)
         #[arg(long)]
         partial_chain: bool,
-        /// Required Extended Key Usage OID for the leaf certificate
-        #[arg(long, value_name = "OID")]
+        /// Required purpose: sslserver, sslclient, smimesign, codesign, any, or an OID
+        #[arg(long, value_name = "PURPOSE")]
         purpose: Option<String>,
+        /// Verify email address against the leaf certificate
+        #[arg(long, value_name = "EMAIL")]
+        verify_email: Option<String>,
+        /// Verify IP address against the leaf certificate
+        #[arg(long, value_name = "IP")]
+        verify_ip: Option<String>,
+        /// Verify at a specific Unix timestamp
+        #[arg(long, value_name = "EPOCH")]
+        attime: Option<i64>,
+        /// Maximum chain depth
+        #[arg(long, value_name = "N")]
+        verify_depth: Option<usize>,
+        /// Display information about the verified chain
+        #[arg(long)]
+        show_chain: bool,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -188,11 +209,32 @@ fn main() -> Result<()> {
             der,
             pem,
             digest,
+            ext,
             json,
-            ..
         } => {
             let input = read_input(file.as_ref())?;
             let cert = parse_input(&input, *der, *pem)?;
+
+            // If --ext is provided, extract that extension by name
+            if let Some(ext_name) = ext {
+                let matching: Vec<_> = cert.extensions.iter().filter(|e| {
+                    e.name.eq_ignore_ascii_case(ext_name) || e.oid == *ext_name
+                }).collect();
+                if matching.is_empty() {
+                    anyhow::bail!("Extension '{}' not found", ext_name);
+                }
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&matching)?);
+                } else {
+                    for e in matching {
+                        println!("{}{}: {:?}",
+                            e.name,
+                            if e.critical { " [critical]" } else { "" },
+                            e.value);
+                    }
+                }
+                return Ok(());
+            }
 
             let output = match field {
                 FieldName::Subject => cert.subject_string(),
@@ -222,9 +264,16 @@ fn main() -> Result<()> {
                     } else {
                         cert.san_entries()
                             .iter()
-                            .map(|e| format!("{:?}", e))
+                            .map(|e| match e {
+                                xcert_lib::SanEntry::Dns(v) => format!("DNS:{}", v),
+                                xcert_lib::SanEntry::Email(v) => format!("email:{}", v),
+                                xcert_lib::SanEntry::Ip(v) => format!("IP Address:{}", v),
+                                xcert_lib::SanEntry::Uri(v) => format!("URI:{}", v),
+                                xcert_lib::SanEntry::DirName(v) => format!("DirName:{}", v),
+                                xcert_lib::SanEntry::Other(v) => format!("othername:{}", v),
+                            })
                             .collect::<Vec<_>>()
-                            .join("\n")
+                            .join(", ")
                     }
                 }
                 FieldName::OcspUrl => cert.ocsp_urls().join("\n"),
@@ -335,24 +384,45 @@ fn main() -> Result<()> {
             file,
             hostname,
             ca_file,
+            ca_path,
             untrusted,
             no_check_time,
             partial_chain,
             purpose,
+            verify_email,
+            verify_ip,
+            attime,
+            verify_depth,
+            show_chain,
             json,
         } => {
             let input = read_input(file.as_ref())?;
 
-            let trust_store = if let Some(ca_path) = ca_file {
-                xcert_lib::TrustStore::from_pem_file(ca_path)?
+            let mut trust_store = if let Some(ca_file_path) = ca_file {
+                xcert_lib::TrustStore::from_pem_file(ca_file_path)?
             } else {
                 xcert_lib::TrustStore::system()?
             };
 
+            if let Some(ca_dir) = ca_path {
+                trust_store.add_pem_directory(ca_dir)?;
+            }
+
+            // Resolve named purposes (sslserver, sslclient, etc.) to OIDs
+            let resolved_purpose = purpose.as_ref().map(|p| {
+                xcert_lib::resolve_purpose(p)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| p.clone())
+            });
+
             let options = xcert_lib::VerifyOptions {
                 check_time: !no_check_time,
                 partial_chain: *partial_chain,
-                purpose: purpose.clone(),
+                purpose: resolved_purpose,
+                at_time: *attime,
+                verify_depth: *verify_depth,
+                verify_email: verify_email.clone(),
+                verify_ip: verify_ip.clone(),
             };
 
             let result = if let Some(untrusted_path) = untrusted {
@@ -379,17 +449,16 @@ fn main() -> Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else if result.is_valid {
-                if let Some(f) = file {
-                    println!("{}: {}", f.display(), result);
-                } else {
-                    println!("stdin: {}", result);
+                let label = file.as_ref().map_or("stdin".to_string(), |f| f.display().to_string());
+                println!("{}: {}", label, result);
+                if *show_chain {
+                    for info in &result.chain {
+                        println!("depth {}: subject = {}, issuer = {}", info.depth, info.subject, info.issuer);
+                    }
                 }
             } else {
-                if let Some(f) = file {
-                    eprintln!("{}: {}", f.display(), result);
-                } else {
-                    eprintln!("stdin: {}", result);
-                }
+                let label = file.as_ref().map_or("stdin".to_string(), |f| f.display().to_string());
+                eprintln!("{}: {}", label, result);
             }
 
             if !result.is_valid {
