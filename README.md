@@ -52,11 +52,12 @@ cargo install --path xcert
 cargo test
 ```
 
-There are 201 integration tests covering parsing, field extraction, extensions,
+There are 210 integration tests covering parsing, field extraction, extensions,
 fingerprints, checks, conversion, display, degenerate/malformed inputs,
 certificate chain verification, verify options (email, IP, time, purpose,
-depth, partial chain), cross-compatibility with external test vectors,
-and OpenSSL output format compatibility.
+depth, partial chain), Name Constraints, CRL revocation checking,
+cross-compatibility with external test vectors, and OpenSSL output format
+compatibility.
 
 ## Usage
 
@@ -159,11 +160,14 @@ fi
 ### `xcert convert` -- Convert between formats
 
 ```bash
-# PEM to DER
-xcert convert --to der cert.pem --out cert.der
+# PEM to DER (format inferred from output extension)
+xcert convert cert.pem cert.der
 
-# DER to PEM (output to stdout)
-xcert convert --to pem cert.der
+# DER to PEM
+xcert convert cert.der cert.pem
+
+# Explicit format flag (required when writing to stdout)
+xcert convert cert.pem --to der > cert.der
 
 # Pipe through stdin
 cat cert.pem | xcert convert --to der > cert.der
@@ -237,7 +241,7 @@ Exit code 0 means verification passed, exit code 2 means verification failed.
 | `openssl x509 -checkhost foo.com -noout -in cert.pem` | `xcert check host foo.com cert.pem` |
 | `openssl x509 -checkip 1.2.3.4 -noout -in cert.pem` | `xcert check ip 1.2.3.4 cert.pem` |
 | `openssl x509 -checkemail a@b.com -noout -in cert.pem` | `xcert check email a@b.com cert.pem` |
-| `openssl x509 -outform DER -in c.pem -out c.der` | `xcert convert --to der c.pem --out c.der` |
+| `openssl x509 -outform DER -in c.pem -out c.der` | `xcert convert c.pem c.der` |
 | `openssl verify chain.pem` | `xcert verify chain.pem` |
 | `openssl verify -CAfile ca.pem cert.pem` | `xcert verify --CAfile ca.pem cert.pem` |
 | `openssl verify -CApath /dir cert.pem` | `xcert verify --CApath /dir cert.pem` |

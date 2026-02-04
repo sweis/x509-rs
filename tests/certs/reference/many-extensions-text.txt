@@ -5,31 +5,31 @@ Certificate:
         Signature Algorithm: sha256WithRSAEncryption
         Issuer: C = US, ST = California, L = San Francisco, O = Test PKI, OU = Certificate Authority, CN = Test Root CA
         Validity
-            Not Before: Feb  3 23:57:07 2026 GMT
-            Not After : Feb  3 23:57:07 2101 GMT
+            Not Before: Feb  4 06:32:18 2026 GMT
+            Not After : Feb  4 06:32:18 2101 GMT
         Subject: C = GB, ST = London, L = City of London, O = Extension Test Ltd, OU = Engineering, CN = extensions.example.com, emailAddress = certs@example.com
         Subject Public Key Info:
             Public Key Algorithm: rsaEncryption
                 Public-Key: (2048 bit)
                 Modulus:
-                    00:f6:49:0c:2b:20:72:08:1d:b8:27:24:c8:bf:ae:
-                    72:2c:cf:33:23:43:06:d9:13:0a:0d:73:8f:7a:05:
-                    19:8c:6d:74:48:f6:d7:b7:da:4b:7f:5d:f5:48:19:
-                    86:33:4e:0b:e4:b7:ea:05:89:38:2b:c6:58:9d:3b:
-                    f7:ec:35:ed:83:a7:35:7f:f1:27:89:eb:15:6f:69:
-                    cf:21:a2:b9:60:6f:4c:75:6c:d2:6e:be:03:b2:91:
-                    07:bc:ed:f6:ac:db:ef:c7:66:f2:44:07:60:38:1d:
-                    9d:fe:ed:2c:e8:a7:28:2f:32:d0:4e:a6:00:80:f5:
-                    30:9a:65:5b:e5:f5:37:ed:39:73:7e:be:4a:eb:1a:
-                    cf:b9:77:7c:05:89:f2:12:c5:0f:8b:b4:76:c7:ad:
-                    de:99:a3:1f:ae:de:50:94:6e:40:72:2f:c9:6c:06:
-                    c7:2c:11:ef:62:ce:7f:ee:71:5a:49:e3:c2:39:d9:
-                    cb:36:15:72:7d:7d:bf:3d:13:f8:7a:8f:e2:40:5c:
-                    62:4a:76:35:27:17:b9:8b:b9:ff:22:d9:eb:3d:82:
-                    fc:fc:29:9d:d6:7f:86:93:1c:33:51:ae:c2:f4:54:
-                    53:fa:53:5b:ac:e4:ef:08:53:04:80:a8:e9:97:f0:
-                    cc:6b:99:1f:56:4f:0f:12:59:de:53:de:fa:5a:ea:
-                    7f:87
+                    00:9c:88:db:af:8a:19:bc:4f:61:53:88:2b:f8:f1:
+                    73:eb:bd:9f:3e:be:e8:be:3a:51:a1:c1:ed:a1:3c:
+                    ed:ef:f7:b7:2c:a5:e1:80:3f:8b:34:9b:47:b9:1b:
+                    3b:3f:31:6a:9d:5a:d1:77:d0:8c:a2:02:e4:98:81:
+                    e0:1d:4a:36:fb:6f:0c:c2:43:a8:5f:77:04:ab:2c:
+                    6d:e0:95:be:5c:f2:00:2d:0e:63:02:de:96:4b:47:
+                    c3:6b:13:fb:cb:48:ce:fb:8d:b8:7c:60:c8:f3:a3:
+                    c5:01:ed:b1:b4:55:b8:bb:48:71:76:78:ed:89:b0:
+                    92:44:04:e9:c4:32:62:46:f7:c9:a6:f1:7b:7d:b4:
+                    ef:ff:ca:ad:30:2e:4a:db:6c:5b:de:58:f6:ea:1c:
+                    36:4f:da:0f:79:f6:66:9f:96:24:70:aa:1a:63:c7:
+                    9d:86:2c:f4:c2:b6:69:ce:e2:be:5f:f0:9a:fc:6d:
+                    d7:5a:7c:56:7e:b0:f0:3e:4d:35:4c:91:76:8f:ac:
+                    39:f9:4e:7f:c5:fd:99:6b:25:7c:5d:71:84:82:eb:
+                    25:44:ad:f4:1b:56:98:fc:7f:6f:af:27:48:84:f6:
+                    f1:03:bf:a2:2d:8f:36:16:ed:de:86:9c:e6:0b:96:
+                    80:7e:89:f5:14:da:a9:43:d2:b0:df:09:50:e8:e2:
+                    1a:db
                 Exponent: 65537 (0x10001)
         X509v3 extensions:
             X509v3 Basic Constraints: 
@@ -39,9 +39,9 @@ Certificate:
             X509v3 Extended Key Usage: 
                 TLS Web Server Authentication, TLS Web Client Authentication, Code Signing, E-mail Protection, Time Stamping
             X509v3 Subject Key Identifier: 
-                DD:C9:CB:F1:EE:81:D9:04:CC:2E:9B:24:13:CC:83:08:B2:EC:D9:33
+                2C:87:23:21:82:04:81:16:47:12:C0:E7:AF:87:13:F5:6E:CB:35:14
             X509v3 Authority Key Identifier: 
-                69:C8:60:9B:B3:6A:7D:FD:26:7E:F9:A9:96:D7:CB:5B:A6:87:27:15
+                50:0E:FC:2B:84:B4:AB:50:6F:33:ED:E5:52:C1:00:63:0C:84:09:F3
             X509v3 Subject Alternative Name: 
                 DNS:extensions.example.com, DNS:*.extensions.example.com, DNS:alt.example.com, IP Address:10.0.0.1, IP Address:192.168.1.1, IP Address:0:0:0:0:0:0:0:1, email:certs@example.com, URI:https://example.com/cert-info
             Authority Information Access: 
@@ -57,18 +57,18 @@ Certificate:
                 This is a test certificate with many extensions
     Signature Algorithm: sha256WithRSAEncryption
     Signature Value:
-        9d:56:b3:a0:b1:94:10:ed:61:99:67:31:13:ce:3a:9e:05:4b:
-        39:0e:c2:5e:c7:69:33:52:25:fd:0a:50:21:51:cb:50:1b:f9:
-        e1:11:b3:cf:4f:9b:a5:33:6b:47:13:5b:74:ed:a2:dc:38:1d:
-        1b:9e:6c:f9:7d:34:c4:fb:c3:72:db:34:c2:34:5c:b6:6c:cd:
-        d3:34:bb:8a:ba:49:82:a6:c3:1d:4a:8d:0b:30:ef:d1:8a:5e:
-        95:ad:d9:36:20:68:50:ed:be:0a:df:30:c7:ba:e2:74:b7:ab:
-        2d:0a:72:c9:c9:c4:69:e9:e8:5b:90:10:49:87:53:6b:8a:e4:
-        c5:9c:a1:f8:17:49:b4:0a:59:1c:f5:3a:33:54:04:9c:fd:49:
-        e3:62:3f:7d:b3:cd:8c:d3:5d:47:74:8f:73:3d:73:44:4e:76:
-        b4:3d:78:32:6c:4a:8f:4d:25:f6:1f:24:87:d9:bb:f4:18:1e:
-        d0:13:13:9f:77:fa:03:6c:56:39:b9:39:82:2e:b0:94:f7:ad:
-        08:28:12:32:2a:3e:82:bf:d6:6c:03:48:40:25:ed:51:14:7e:
-        71:d6:97:cf:89:6c:f6:58:1a:d4:e0:9d:b1:b3:ca:03:19:2d:
-        6a:2f:d7:e3:94:dc:c3:c6:f7:24:7f:50:51:c3:b0:44:dc:3d:
-        2f:43:4e:1d
+        9f:6e:9f:e9:31:32:27:c5:49:2e:01:b8:f1:32:28:4f:9f:04:
+        b8:e5:d6:b2:8c:d7:e4:c9:0b:b2:fd:db:98:7f:d0:3f:31:50:
+        72:a7:df:88:26:e6:f3:c6:5a:e1:2a:1b:e9:44:60:5f:7b:5a:
+        dd:1a:fa:b8:ef:4c:7f:84:f2:8f:71:fd:39:89:6e:71:40:a9:
+        c3:8c:a7:42:dc:80:1b:cb:4e:14:f9:b0:cb:dc:18:43:f9:56:
+        7b:a6:8a:e2:6b:7d:20:01:de:9b:ee:84:79:f0:97:10:9f:b9:
+        39:06:27:6f:0f:d7:3c:dd:9d:02:e3:3e:d0:73:22:8d:12:9f:
+        3f:a0:15:39:1c:d2:f7:e2:db:6f:8d:78:eb:25:5f:81:50:e2:
+        1d:5b:b3:04:f4:b0:ba:dc:a3:ce:a4:c9:e4:b7:89:4b:9d:b6:
+        66:81:09:20:a2:16:c1:fb:39:06:eb:e8:d5:f1:42:89:89:4f:
+        f3:46:e2:57:82:3d:b2:3e:6d:e6:05:d2:e6:22:cb:9f:9f:9d:
+        ce:07:61:d4:b5:c2:14:e6:5e:eb:12:1a:94:45:0f:92:bd:66:
+        4c:59:82:e6:07:92:b2:90:45:00:58:b9:51:0e:d1:a4:79:04:
+        e8:92:d9:f3:11:22:02:b1:c2:53:46:91:93:f0:a8:11:9e:99:
+        ca:51:46:ad

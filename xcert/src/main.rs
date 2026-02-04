@@ -6,7 +6,24 @@ use std::io::Read;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "xcert", about = "Inspect X.509 certificates")]
+#[command(
+    name = "xcert",
+    about = "A fast, memory-safe tool for inspecting X.509 certificates",
+    long_about = "xcert parses and displays X.509 certificates in PEM or DER format.\n\
+                  It is a modern, read-only replacement for `openssl x509` with a\n\
+                  simpler interface, JSON output, and subcommand-based CLI.\n\n\
+                  Input format (PEM vs DER) is auto-detected unless --pem or --der\n\
+                  is specified. All commands read from stdin when no file is given.",
+    after_help = "EXAMPLES:\n\
+                  \n  xcert show cert.pem\
+                  \n  xcert show --json cert.pem\
+                  \n  xcert field subject cert.pem\
+                  \n  xcert field fingerprint --digest sha384 cert.pem\
+                  \n  xcert check host www.example.com cert.pem\
+                  \n  xcert convert cert.pem cert.der\
+                  \n  xcert verify --hostname www.example.com chain.pem\
+                  \n  cat cert.pem | xcert show"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -14,14 +31,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Display certificate information
+    /// Display certificate information (like openssl x509 -text)
+    #[command(after_help = "EXAMPLES:\n\
+                      \n  xcert show cert.pem\
+                      \n  xcert show --json cert.pem\
+                      \n  xcert show --all cert.pem\
+                      \n  xcert show cert.der\
+                      \n  cat cert.pem | xcert show")]
     Show {
         /// Certificate file (PEM or DER). Reads from stdin if omitted.
         file: Option<PathBuf>,
-        /// Force DER input parsing
+        /// Force DER input parsing (default: auto-detect)
         #[arg(long)]
         der: bool,
-        /// Force PEM input parsing
+        /// Force PEM input parsing (default: auto-detect)
         #[arg(long)]
         pem: bool,
         /// Output in JSON format
@@ -32,21 +55,44 @@ enum Commands {
         all: bool,
     },
     /// Extract a single field from the certificate
+    #[command(after_help = "FIELDS:\n\
+                      \n  subject        Subject distinguished name\
+                      \n  issuer         Issuer distinguished name\
+                      \n  serial         Serial number (colon-separated hex)\
+                      \n  not-before     Not Before date (ISO 8601)\
+                      \n  not-after      Not After date (ISO 8601)\
+                      \n  fingerprint    Certificate fingerprint (default: SHA-256)\
+                      \n  public-key     Subject public key in PEM format\
+                      \n  modulus        RSA modulus in hex (RSA certificates only)\
+                      \n  exponent       RSA public exponent (RSA certificates only)\
+                      \n  emails         Email addresses from subject and SAN\
+                      \n  san            Subject Alternative Names\
+                      \n  ocsp-url       OCSP responder URL(s) from AIA extension\
+                      \n  key-usage      Key Usage extension values\
+                      \n  ext-key-usage  Extended Key Usage extension values\
+                      \n  extensions     All extensions (use --ext to filter)\
+                      \n\nEXAMPLES:\n\
+                      \n  xcert field subject cert.pem\
+                      \n  xcert field fingerprint cert.pem\
+                      \n  xcert field fingerprint --digest sha384 cert.pem\
+                      \n  xcert field san --json cert.pem\
+                      \n  xcert field extensions --ext subjectAltName cert.pem\
+                      \n  xcert field extensions --ext \"Key Usage\" cert.pem")]
     Field {
         /// Field to extract
         field: FieldName,
         /// Certificate file. Reads from stdin if omitted.
         file: Option<PathBuf>,
-        /// Force DER input parsing
+        /// Force DER input parsing (default: auto-detect)
         #[arg(long)]
         der: bool,
-        /// Force PEM input parsing
+        /// Force PEM input parsing (default: auto-detect)
         #[arg(long)]
         pem: bool,
-        /// Hash algorithm for fingerprint
+        /// Hash algorithm for fingerprint: sha256, sha384, sha512, sha1
         #[arg(long, default_value = "sha256")]
         digest: String,
-        /// Extension name filter (e.g., "subjectAltName", "keyUsage")
+        /// Filter extensions by name or OID (e.g., "subjectAltName", "2.5.29.17")
         #[arg(long)]
         ext: Option<String>,
         /// Output in JSON format
@@ -54,40 +100,77 @@ enum Commands {
         json: bool,
     },
     /// Check certificate properties (exit code 0 = pass, 1 = fail)
+    #[command(after_help = "CHECKS:\n\
+                      \n  expiry <SECONDS>   Pass if cert is valid for at least SECONDS more\
+                      \n  host <HOSTNAME>    Pass if hostname matches SAN/CN (RFC 6125 wildcards)\
+                      \n  email <EMAIL>      Pass if email matches SAN or subject emailAddress\
+                      \n  ip <ADDRESS>       Pass if IP matches SAN (IPv4 or IPv6)\
+                      \n\nEXAMPLES:\n\
+                      \n  xcert check expiry 2592000 cert.pem    # valid for 30+ days?\
+                      \n  xcert check host www.example.com cert.pem\
+                      \n  xcert check email user@example.com cert.pem\
+                      \n  xcert check ip 93.184.216.34 cert.pem")]
     Check {
-        /// Check to perform
+        /// Check to perform: expiry, host, email, ip
         check: CheckType,
-        /// Value to check against
+        /// Value to check (seconds for expiry, hostname/email/IP for others)
         value: String,
         /// Certificate file. Reads from stdin if omitted.
         file: Option<PathBuf>,
-        /// Force DER input parsing
+        /// Force DER input parsing (default: auto-detect)
         #[arg(long)]
         der: bool,
-        /// Force PEM input parsing
+        /// Force PEM input parsing (default: auto-detect)
         #[arg(long)]
         pem: bool,
     },
     /// Convert between PEM and DER formats
+    #[command(
+        after_help = "If OUTPUT is given, the format is inferred from its extension\n\
+                      (.pem or .der). If OUTPUT is omitted, output goes to stdout\n\
+                      and --to is required to specify the format.\n\
+                      \nEXAMPLES:\n\
+                      \n  xcert convert cert.pem cert.der\
+                      \n  xcert convert cert.der cert.pem\
+                      \n  xcert convert cert.pem --to der > out.der\
+                      \n  cat cert.pem | xcert convert --to der > cert.der"
+    )]
     Convert {
-        /// Certificate file. Reads from stdin if omitted.
+        /// Input certificate file. Reads from stdin if omitted.
         file: Option<PathBuf>,
-        /// Output format
+        /// Output file. Format is inferred from extension (.pem or .der).
+        output: Option<PathBuf>,
+        /// Output format: pem, der (required when writing to stdout)
         #[arg(long, value_name = "FORMAT")]
-        to: String,
-        /// Output file (default: stdout)
-        #[arg(long)]
-        out: Option<PathBuf>,
-        /// Force DER input parsing
+        to: Option<String>,
+        /// Force DER input parsing (default: auto-detect)
         #[arg(long)]
         der: bool,
-        /// Force PEM input parsing
+        /// Force PEM input parsing (default: auto-detect)
         #[arg(long)]
         pem: bool,
     },
-    /// Verify a certificate chain against a trust store
+    /// Verify a certificate chain against a trust store (exit 0 = valid, 2 = fail)
+    #[command(
+        after_help = "FILE is a PEM bundle with the leaf certificate first, followed by\n\
+                      intermediates. Uses the system trust store by default.\n\
+                      \nPURPOSE VALUES:\n\
+                      \n  sslserver   TLS server authentication (OID 1.3.6.1.5.5.7.3.1)\
+                      \n  sslclient   TLS client authentication (OID 1.3.6.1.5.5.7.3.2)\
+                      \n  smimesign   S/MIME email signing    (OID 1.3.6.1.5.5.7.3.4)\
+                      \n  codesign    Code signing            (OID 1.3.6.1.5.5.7.3.3)\
+                      \n  any         Any Extended Key Usage  (OID 2.5.29.37.0)\
+                      \n  <OID>       Custom OID (e.g., 1.3.6.1.5.5.7.3.8)\
+                      \n\nEXAMPLES:\n\
+                      \n  xcert verify chain.pem\
+                      \n  xcert verify --hostname www.example.com chain.pem\
+                      \n  xcert verify --CAfile ca.pem --untrusted int.pem leaf.pem\
+                      \n  xcert verify --purpose sslserver chain.pem\
+                      \n  xcert verify --json chain.pem\
+                      \n  cat chain.pem | xcert verify"
+    )]
     Verify {
-        /// PEM file containing the certificate chain (leaf first, then intermediates).
+        /// PEM file with certificate chain (leaf first, then intermediates).
         /// Reads from stdin if omitted.
         file: Option<PathBuf>,
         /// Hostname to verify against the leaf certificate's SAN/CN
@@ -100,7 +183,7 @@ enum Commands {
         #[arg(long = "CApath", visible_alias = "ca-path", value_name = "DIR")]
         ca_path: Option<PathBuf>,
         /// PEM file with untrusted intermediate certificates
-        #[arg(long)]
+        #[arg(long, value_name = "FILE")]
         untrusted: Option<PathBuf>,
         /// Skip validity date checks
         #[arg(long)]
@@ -108,24 +191,33 @@ enum Commands {
         /// Allow partial chain verification (trust any cert in the chain)
         #[arg(long)]
         partial_chain: bool,
-        /// Required purpose: sslserver, sslclient, smimesign, codesign, any, or an OID
+        /// Required EKU purpose: sslserver, sslclient, smimesign, codesign, any, or OID
         #[arg(long, value_name = "PURPOSE")]
         purpose: Option<String>,
-        /// Verify email address against the leaf certificate
+        /// Verify email address against the leaf certificate's SAN/subject
         #[arg(long, value_name = "EMAIL")]
         verify_email: Option<String>,
-        /// Verify IP address against the leaf certificate
+        /// Verify IP address against the leaf certificate's SAN
         #[arg(long, value_name = "IP")]
         verify_ip: Option<String>,
-        /// Verify at a specific Unix timestamp
+        /// Verify at a specific Unix timestamp instead of current time
         #[arg(long, value_name = "EPOCH")]
         attime: Option<i64>,
         /// Maximum chain depth
         #[arg(long, value_name = "N")]
         verify_depth: Option<usize>,
-        /// Display information about the verified chain
+        /// Display subject and issuer for each certificate in the verified chain
         #[arg(long)]
         show_chain: bool,
+        /// PEM file containing CRL(s) for revocation checking
+        #[arg(long = "CRLfile", visible_alias = "crl-file", value_name = "FILE")]
+        crl_file: Option<PathBuf>,
+        /// Check CRL revocation for the leaf certificate
+        #[arg(long)]
+        crl_check: bool,
+        /// Check CRL revocation for all certificates in the chain
+        #[arg(long)]
+        crl_check_all: bool,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -142,6 +234,7 @@ enum FieldName {
     Fingerprint,
     PublicKey,
     Modulus,
+    Exponent,
     Emails,
     San,
     OcspUrl,
@@ -183,6 +276,15 @@ fn parse_input(input: &[u8], der: bool, pem: bool) -> Result<xcert_lib::Certific
         Ok(xcert_lib::parse_pem(input)?)
     } else {
         Ok(xcert_lib::parse_cert(input)?)
+    }
+}
+
+/// Infer output format ("pem" or "der") from a file extension.
+fn infer_format(path: &std::path::Path) -> Option<&'static str> {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("pem") => Some("pem"),
+        Some(ext) if ext.eq_ignore_ascii_case("der") => Some("der"),
+        _ => None,
     }
 }
 
@@ -255,7 +357,10 @@ fn main() -> Result<()> {
                         "sha384" => xcert_lib::DigestAlgorithm::Sha384,
                         "sha512" => xcert_lib::DigestAlgorithm::Sha512,
                         "sha1" => xcert_lib::DigestAlgorithm::Sha1,
-                        _ => anyhow::bail!("Unsupported digest: {}", digest),
+                        _ => anyhow::bail!(
+                            "Unsupported digest: {}. Use sha256, sha384, sha512, or sha1.",
+                            digest
+                        ),
                     };
                     cert.fingerprint(alg)
                 }
@@ -264,6 +369,11 @@ fn main() -> Result<()> {
                     .modulus_hex()
                     .unwrap_or("(not an RSA certificate)")
                     .to_string(),
+                FieldName::Exponent => cert
+                    .public_key
+                    .exponent
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "(not an RSA certificate)".to_string()),
                 FieldName::Emails => cert.emails().join("\n"),
                 FieldName::San => {
                     if *json {
@@ -336,12 +446,29 @@ fn main() -> Result<()> {
         }
         Commands::Convert {
             file,
+            output,
             to,
-            out,
             der,
             pem,
         } => {
             let input = read_input(file.as_ref())?;
+
+            // Determine output format: explicit --to flag, inferred from output
+            // file extension, or error.
+            let format = if let Some(fmt) = to {
+                fmt.as_str().to_owned()
+            } else if let Some(out_path) = output {
+                infer_format(out_path)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Cannot infer output format from '{}'. Use .pem/.der extension or --to.",
+                            out_path.display()
+                        )
+                    })?
+                    .to_owned()
+            } else {
+                anyhow::bail!("Output format required: use --to pem|der, or provide an output file with .pem/.der extension");
+            };
 
             let is_pem_input = if *pem {
                 true
@@ -358,7 +485,7 @@ fn main() -> Result<()> {
                 trimmed.starts_with(b"-----BEGIN")
             };
 
-            let output_bytes: Vec<u8> = match to.as_str() {
+            let output_bytes: Vec<u8> = match format.as_str() {
                 "der" => {
                     if is_pem_input {
                         xcert_lib::pem_to_der(&input)?
@@ -374,10 +501,10 @@ fn main() -> Result<()> {
                     };
                     xcert_lib::der_to_pem(&der_input).into_bytes()
                 }
-                _ => anyhow::bail!("Unsupported output format: {}. Use 'pem' or 'der'.", to),
+                _ => anyhow::bail!("Unsupported output format: {}. Use 'pem' or 'der'.", format),
             };
 
-            if let Some(out_path) = out {
+            if let Some(out_path) = output {
                 std::fs::write(out_path, &output_bytes)?;
             } else {
                 use std::io::Write;
@@ -398,6 +525,9 @@ fn main() -> Result<()> {
             attime,
             verify_depth,
             show_chain,
+            crl_file,
+            crl_check,
+            crl_check_all,
             json,
         } => {
             let input = read_input(file.as_ref())?;
@@ -411,6 +541,15 @@ fn main() -> Result<()> {
             if let Some(ca_dir) = ca_path {
                 trust_store.add_pem_directory(ca_dir)?;
             }
+
+            // Load CRL file if provided
+            let crl_ders = if let Some(crl_path) = crl_file {
+                let crl_data = std::fs::read(crl_path)
+                    .with_context(|| format!("Failed to read CRL file: {}", crl_path.display()))?;
+                xcert_lib::parse_pem_crl(&crl_data)?
+            } else {
+                Vec::new()
+            };
 
             // Resolve named purposes (sslserver, sslclient, etc.) to OIDs
             let resolved_purpose = purpose.as_ref().map(|p| {
@@ -427,6 +566,9 @@ fn main() -> Result<()> {
                 verify_depth: *verify_depth,
                 verify_email: verify_email.clone(),
                 verify_ip: verify_ip.clone(),
+                crl_ders,
+                crl_check_leaf: *crl_check || *crl_check_all,
+                crl_check_all: *crl_check_all,
             };
 
             let result = if let Some(untrusted_path) = untrusted {
