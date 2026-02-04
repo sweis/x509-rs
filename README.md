@@ -48,8 +48,9 @@ cargo install --path xcert
 cargo test
 ```
 
-There are 121 integration tests covering parsing, field extraction, extensions,
-fingerprints, checks, conversion, display, and degenerate/malformed inputs.
+There are 155 integration tests covering parsing, field extraction, extensions,
+fingerprints, checks, conversion, display, degenerate/malformed inputs, and
+certificate chain verification.
 
 ## Usage
 
@@ -188,22 +189,22 @@ startup). Environment: Linux 4.4.0, OpenSSL 3.0.13.
 
 | Operation | OpenSSL avg (ms) | xcert avg (ms) | Speedup |
 |---|--:|--:|--:|
-| Parse + text display (root-ca.pem) | 43.24 | 11.63 | 3.7x |
-| Parse + text display (server.pem) | 44.34 | 11.51 | 3.9x |
-| Parse + text display (many-extensions.pem) | 46.34 | 11.17 | 4.1x |
-| Subject extraction (root-ca.pem) | 46.76 | 11.49 | 4.1x |
-| Subject extraction (server.pem) | 48.54 | 11.22 | 4.3x |
-| Subject extraction (many-extensions.pem) | 48.15 | 10.87 | 4.4x |
-| SHA-256 fingerprint (root-ca.pem) | 46.68 | 10.97 | 4.3x |
-| SHA-256 fingerprint (server.pem) | 48.55 | 11.19 | 4.3x |
-| SHA-256 fingerprint (many-extensions.pem) | 46.85 | 11.21 | 4.2x |
-| PEM to DER (root-ca.pem) | 48.75 | 11.10 | 4.4x |
-| PEM to DER (server.pem) | 47.45 | 11.09 | 4.3x |
-| PEM to DER (many-extensions.pem) | 47.66 | 11.24 | 4.2x |
-| DER parse + text display (root-ca.der) | 49.54 | 12.13 | 4.1x |
-| Hostname check (server.pem) | 61.92 | 11.75 | 5.3x |
+| Parse + text display (root-ca.pem) | 43.27 | 10.29 | 4.2x |
+| Parse + text display (server.pem) | 43.83 | 10.23 | 4.3x |
+| Parse + text display (many-extensions.pem) | 43.90 | 10.41 | 4.2x |
+| Subject extraction (root-ca.pem) | 44.09 | 10.72 | 4.1x |
+| Subject extraction (server.pem) | 44.33 | 10.21 | 4.3x |
+| Subject extraction (many-extensions.pem) | 44.78 | 10.55 | 4.2x |
+| SHA-256 fingerprint (root-ca.pem) | 42.50 | 10.51 | 4.0x |
+| SHA-256 fingerprint (server.pem) | 42.27 | 10.61 | 4.0x |
+| SHA-256 fingerprint (many-extensions.pem) | 43.32 | 11.69 | 3.7x |
+| PEM to DER (root-ca.pem) | 43.07 | 10.78 | 4.0x |
+| PEM to DER (server.pem) | 43.70 | 10.07 | 4.3x |
+| PEM to DER (many-extensions.pem) | 43.65 | 9.86 | 4.4x |
+| DER parse + text display (root-ca.der) | 43.30 | 9.59 | 4.5x |
+| Hostname check (server.pem) | 43.14 | 9.86 | 4.4x |
 
-**Summary:** xcert is **3.7x -- 5.3x faster** than `openssl x509` across all
+**Summary:** xcert is **3.7x -- 4.5x faster** than `openssl x509` across all
 operations. Both tools are dominated by process startup overhead, but the xcert
 binary is significantly lighter (~4 MB static vs OpenSSL's dynamic linking and
 larger initialization path).
