@@ -20,3 +20,4 @@ time = "0.3"
 workspace = true
 
 [dev-dependencies]
+time = { version = "0.3", features = ["parsing"] }
