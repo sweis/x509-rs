@@ -399,6 +399,50 @@ where
     failures
 }
 
+/// Convert a verification result (or error) into a BatchResult.
+fn verify_to_batch(
+    label: String,
+    result: Result<xcert_lib::VerificationResult, impl std::fmt::Display>,
+) -> BatchResult {
+    match result {
+        Ok(r) => BatchResult {
+            path: label,
+            pass: r.is_valid,
+            detail: format!("{}", r),
+        },
+        Err(e) => BatchResult {
+            path: label,
+            pass: false,
+            detail: format!("FAIL ({})", e),
+        },
+    }
+}
+
+/// Print a single-file verification result (JSON, text valid, or text invalid).
+fn print_verify_result(
+    label: &str,
+    result: &xcert_lib::VerificationResult,
+    json: bool,
+    show_chain: bool,
+) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(result)?);
+    } else if result.is_valid {
+        println!("{}: {}", label, result);
+        if show_chain {
+            for info in &result.chain {
+                println!(
+                    "depth {}: subject = {}, issuer = {}",
+                    info.depth, info.subject, info.issuer
+                );
+            }
+        }
+    } else {
+        eprintln!("{}: {}", label, result);
+    }
+    Ok(())
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("Error: {e}");
@@ -807,18 +851,7 @@ fn run() -> Result<()> {
                                 hostname.as_deref(),
                                 &options,
                             );
-                            return vec![match result {
-                                Ok(r) => BatchResult {
-                                    path: label,
-                                    pass: r.is_valid,
-                                    detail: format!("{}", r),
-                                },
-                                Err(e) => BatchResult {
-                                    path: label,
-                                    pass: false,
-                                    detail: format!("FAIL ({})", e),
-                                },
-                            }];
+                            return vec![verify_to_batch(label, result)];
                         }
 
                         // Parse PEM and detect bundle vs chain
@@ -847,18 +880,7 @@ fn run() -> Result<()> {
                                         hostname.as_deref(),
                                         &options,
                                     );
-                                    match result {
-                                        Ok(r) => BatchResult {
-                                            path: cert_label,
-                                            pass: r.is_valid,
-                                            detail: format!("{}", r),
-                                        },
-                                        Err(e) => BatchResult {
-                                            path: cert_label,
-                                            pass: false,
-                                            detail: format!("FAIL ({})", e),
-                                        },
-                                    }
+                                    verify_to_batch(cert_label, result)
                                 })
                                 .collect();
                         }
@@ -870,18 +892,7 @@ fn run() -> Result<()> {
                             hostname.as_deref(),
                             &options,
                         );
-                        vec![match result {
-                            Ok(r) => BatchResult {
-                                path: label,
-                                pass: r.is_valid,
-                                detail: format!("{}", r),
-                            },
-                            Err(e) => BatchResult {
-                                path: label,
-                                pass: false,
-                                detail: format!("FAIL ({})", e),
-                            },
-                        }]
+                        vec![verify_to_batch(label, result)]
                     });
                     if failures > 0 {
                         std::process::exit(2);
@@ -912,21 +923,7 @@ fn run() -> Result<()> {
                     &options,
                 )?;
 
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&result)?);
-                } else if result.is_valid {
-                    println!("{}: {}", label, result);
-                    if *show_chain {
-                        for info in &result.chain {
-                            println!(
-                                "depth {}: subject = {}, issuer = {}",
-                                info.depth, info.subject, info.issuer
-                            );
-                        }
-                    }
-                } else {
-                    eprintln!("{}: {}", label, result);
-                }
+                print_verify_result(&label, &result, *json, *show_chain)?;
                 if !result.is_valid {
                     std::process::exit(2);
                 }
@@ -947,12 +944,8 @@ fn run() -> Result<()> {
                         );
                         match result {
                             Ok(r) => {
-                                if *json {
-                                    println!("{}", serde_json::to_string_pretty(&r)?);
-                                } else if r.is_valid {
-                                    println!("{}: {}", cert_label, r);
-                                } else {
-                                    eprintln!("{}: {}", cert_label, r);
+                                print_verify_result(&cert_label, &r, *json, false)?;
+                                if !r.is_valid {
                                     any_invalid = true;
                                 }
                             }
@@ -974,21 +967,7 @@ fn run() -> Result<()> {
                         &options,
                     )?;
 
-                    if *json {
-                        println!("{}", serde_json::to_string_pretty(&result)?);
-                    } else if result.is_valid {
-                        println!("{}: {}", label, result);
-                        if *show_chain {
-                            for info in &result.chain {
-                                println!(
-                                    "depth {}: subject = {}, issuer = {}",
-                                    info.depth, info.subject, info.issuer
-                                );
-                            }
-                        }
-                    } else {
-                        eprintln!("{}: {}", label, result);
-                    }
+                    print_verify_result(&label, &result, *json, *show_chain)?;
                     if !result.is_valid {
                         std::process::exit(2);
                     }
