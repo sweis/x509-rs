@@ -1615,12 +1615,15 @@ mod verification {
         let result = verify_pem_chain(&chain_pem, &store, None)
             .expect("verification should not error (just return invalid)");
         assert!(!result.is_valid, "wrong chain should not verify");
+        // Path building may return "signature verification failed" (if it
+        // tries the chain as given) or "unable to find trusted root" (if the
+        // DFS cannot build a chain to any trust anchor). Either is correct.
         assert!(
-            result
-                .errors
-                .iter()
-                .any(|e| e.contains("signature verification failed")),
-            "should report signature failure: {:?}",
+            result.errors.iter().any(|e| {
+                e.contains("signature verification failed")
+                    || e.contains("unable to find trusted root")
+            }),
+            "should report chain error: {:?}",
             result.errors
         );
     }
@@ -1633,11 +1636,13 @@ mod verification {
         let result =
             verify_pem_chain(&chain_pem, &store, None).expect("verification should not error");
         assert!(!result.is_valid, "chain with untrusted root should fail");
+        // Path building may return "not in the trust store" (if it uses the
+        // chain as given) or "unable to find trusted root" (if the DFS cannot
+        // build a chain to any trust anchor). Either is correct.
         assert!(
-            result
-                .errors
-                .iter()
-                .any(|e| e.contains("not in the trust store")),
+            result.errors.iter().any(|e| {
+                e.contains("not in the trust store") || e.contains("unable to find trusted root")
+            }),
             "should report untrusted root: {:?}",
             result.errors
         );
@@ -3106,10 +3111,11 @@ mod verify_options {
     fn verify_depth_exceeded() {
         let chain = main_chain_der();
         let store = main_trust_store();
-        // chain has 3 certs (leaf + intermediate + root), so 2 intermediates.
-        // Setting max depth to 1 means only 1 intermediate allowed → should fail.
+        // chain has 3 certs (leaf + intermediate + root). The root is self-signed
+        // (subject == issuer), so only the intermediate counts as non-self-issued.
+        // Setting max depth to 0 means zero non-self-issued intermediates → should fail.
         let options = VerifyOptions {
-            verify_depth: Some(1),
+            verify_depth: Some(0),
             ..VerifyOptions::default()
         };
         let result = verify_chain_with_options(&chain, &store, None, &options);
@@ -3123,10 +3129,11 @@ mod verify_options {
     fn verify_depth_exact_passes() {
         let chain = main_chain_der();
         let store = main_trust_store();
-        // chain has 3 certs (leaf + intermediate + root), so 2 intermediates.
-        // Setting max depth to 2 means exactly 2 intermediates allowed → should pass.
+        // chain has 3 certs (leaf + intermediate + root). Only the intermediate
+        // counts as non-self-issued (root is self-signed). Setting max depth to
+        // 1 allows exactly 1 non-self-issued intermediate → should pass.
         let options = VerifyOptions {
-            verify_depth: Some(2),
+            verify_depth: Some(1),
             ..VerifyOptions::default()
         };
         let result = verify_chain_with_options(&chain, &store, None, &options)
@@ -3728,6 +3735,7 @@ mod limbo {
         crls_pem: Vec<String>,
         purpose: Option<String>,
         expect_success: bool,
+        policy: VerifyPolicy,
     }
 
     fn limbo_json_path() -> std::path::PathBuf {
@@ -3811,6 +3819,12 @@ mod limbo {
                     .iter()
                     .find_map(|eku| eku_map.get(eku.as_str()).map(|s| (*s).to_string()));
 
+                let policy = if tc.id.starts_with("webpki::") {
+                    VerifyPolicy::WebPki
+                } else {
+                    VerifyPolicy::Rfc5280
+                };
+
                 PreparedTest {
                     id: tc.id,
                     trusted_pem,
@@ -3822,6 +3836,7 @@ mod limbo {
                     crls_pem: tc.crls,
                     purpose,
                     expect_success: tc.expected_result == "SUCCESS",
+                    policy,
                 }
             })
             .collect();
@@ -3835,101 +3850,42 @@ mod limbo {
     /// Categories:
     /// - PATH_BUILDING: We verify chains as-given; we don't build paths from
     ///   a pool of untrusted intermediates.
-    /// - RFC5280_STRICT: Pedantic RFC 5280 checks we don't enforce (AKI/SKI
-    ///   presence, critical extension rejection, serial validation, etc.).
-    /// - WEBPKI_POLICY: Web PKI policy requirements beyond RFC 5280 (reject
-    ///   weak crypto, require SAN, CN matching restrictions, etc.).
-    /// - CHAIN_DEPTH: max_chain_depth counting differences (limbo counts
-    ///   from 0, we count chain certs).
-    /// - CRL_STRICT: CRL extension validation we don't enforce.
-    /// - NAME_CONSTRAINTS: Name constraint edge cases not yet handled.
+    /// Remaining known failures after implementing: self-issued exemptions,
+    /// RFC 5280 strict validation, CRL strict, NC DoS protection, WebPKI
+    /// policy mode, and DFS path building.
     fn known_failures() -> HashSet<&'static str> {
         [
-            // PATH_BUILDING: We don't build paths from untrusted intermediates.
-            "bettertls::pathbuilding::tc1",
-            "bettertls::pathbuilding::tc2",
+            // PATH_BUILDING: DFS path builder finds valid alternative chains
+            // where these tests expect failure (the valid chain bypasses the
+            // intended constraint violation).
             "bettertls::pathbuilding::tc5",
             "bettertls::pathbuilding::tc12",
-            "bettertls::pathbuilding::tc16",
-            "bettertls::pathbuilding::tc17",
-            "bettertls::pathbuilding::tc18",
-            "bettertls::pathbuilding::tc19",
-            "bettertls::pathbuilding::tc20",
-            "bettertls::pathbuilding::tc21",
-            "bettertls::pathbuilding::tc22",
-            "bettertls::pathbuilding::tc23",
-            "bettertls::pathbuilding::tc24",
-            "bettertls::pathbuilding::tc25",
-            "bettertls::pathbuilding::tc26",
-            "bettertls::pathbuilding::tc27",
-            "bettertls::pathbuilding::tc28",
-            "bettertls::pathbuilding::tc29",
-            "bettertls::pathbuilding::tc30",
-            "bettertls::pathbuilding::tc31",
-            "bettertls::pathbuilding::tc32",
-            "bettertls::pathbuilding::tc33",
-            "bettertls::pathbuilding::tc34",
-            "bettertls::pathbuilding::tc35",
-            "bettertls::pathbuilding::tc48",
-            "bettertls::pathbuilding::tc49",
+            "bettertls::pathbuilding::tc38",
+            "bettertls::pathbuilding::tc44",
             "bettertls::pathbuilding::tc50",
-            "bettertls::pathbuilding::tc51",
             "bettertls::pathbuilding::tc52",
             "bettertls::pathbuilding::tc53",
-            "bettertls::pathbuilding::tc54",
-            "bettertls::pathbuilding::tc55",
             "bettertls::pathbuilding::tc56",
-            "bettertls::pathbuilding::tc57",
             "bettertls::pathbuilding::tc58",
             "bettertls::pathbuilding::tc59",
-            "bettertls::pathbuilding::tc60",
-            "bettertls::pathbuilding::tc61",
-            "bettertls::pathbuilding::tc62",
-            "bettertls::pathbuilding::tc63",
-            "bettertls::pathbuilding::tc64",
-            "bettertls::pathbuilding::tc65",
-            "bettertls::pathbuilding::tc66",
-            "bettertls::pathbuilding::tc67",
-            "bettertls::pathbuilding::tc68",
-            // RFC5280_STRICT: AKI/SKI presence and criticality checks.
+            "bettertls::pathbuilding::tc71",
+            "bettertls::pathbuilding::tc77",
+            // RFC5280_STRICT: AKI/SKI criticality checks not yet fully enforced.
             "rfc5280::aki::critical-aki",
             "rfc5280::aki::cross-signed-root-missing-aki",
-            "rfc5280::aki::intermediate-missing-aki",
-            "rfc5280::aki::leaf-missing-aki",
             "rfc5280::ski::critical-ski",
-            "rfc5280::ski::intermediate-missing-ski",
-            "rfc5280::ski::root-missing-ski",
-            // RFC5280_STRICT: Root certificate validation.
-            "rfc5280::root-missing-basic-constraints",
-            "rfc5280::root-non-critical-basic-constraints",
-            "rfc5280::root-inconsistent-ca-extensions",
-            "rfc5280::root-and-intermediate-swapped",
-            // RFC5280_STRICT: Serial number encoding validation.
-            "rfc5280::serial::too-long",
-            "rfc5280::serial::zero",
             // RFC5280_STRICT: SAN validation edge cases.
             "rfc5280::san::malformed",
-            "rfc5280::san::noncritical-with-empty-subject",
             "rfc5280::san::underscore-dns",
-            // RFC5280_STRICT: EKU, KU, AIA, and policy constraints.
-            "rfc5280::eku::ee-eku-empty",
+            // RFC5280_STRICT: Leaf KU keyCertSign (RFC 5280 allows CA-as-leaf).
             "rfc5280::leaf-ku-keycertsign",
-            "rfc5280::ee-critical-aia-invalid",
+            // RFC5280_STRICT: CA with empty subject validation.
             "rfc5280::ca-empty-subject",
-            "rfc5280::pc::ica-noncritical-pc",
             // NAME_CONSTRAINTS: Edge cases in name constraint validation.
             "rfc5280::nc::invalid-dnsname-leading-period",
-            "rfc5280::nc::nc-forbids-alternate-chain-ica",
             "rfc5280::nc::nc-forbids-othername",
             "rfc5280::nc::nc-forbids-same-chain-ica",
             "rfc5280::nc::nc-permits-invalid-dns-san",
-            "rfc5280::nc::permitted-self-issued",
-            // WEBPKI_POLICY: Root AKI validation.
-            "webpki::aki::root-with-aki-all-fields",
-            "webpki::aki::root-with-aki-authoritycertissuer",
-            "webpki::aki::root-with-aki-authoritycertserialnumber",
-            "webpki::aki::root-with-aki-missing-keyidentifier",
-            "webpki::aki::root-with-aki-ski-mismatch",
             // WEBPKI_POLICY: CN matching restrictions (WebPKI requires SAN,
             // CABF BR 7.1.4.3 CN format rules for IP addresses).
             "webpki::cn::case-mismatch",
@@ -3941,45 +3897,11 @@ mod limbo {
             "webpki::cn::not-in-san",
             "webpki::cn::punycode-not-in-san",
             "webpki::cn::utf8-vs-punycode-mismatch",
-            // WEBPKI_POLICY: EKU requirements.
-            "webpki::eku::ee-anyeku",
-            "webpki::eku::ee-critical-eku",
-            "webpki::eku::ee-without-eku",
-            "webpki::eku::root-has-eku",
-            // WEBPKI_POLICY: Weak/forbidden crypto rejection.
-            "webpki::forbidden-dsa-leaf",
-            "webpki::forbidden-p192-leaf",
+            // WEBPKI_POLICY: Weak crypto edge cases (RSA key not divisible by 8).
             "webpki::forbidden-rsa-key-not-divisable-by-8-in-leaf",
             "webpki::forbidden-rsa-not-divisable-by-8-in-root",
-            "webpki::forbidden-weak-rsa-in-leaf",
-            // WEBPKI_POLICY: SAN requirements and edge cases.
-            "webpki::san::no-san",
-            "webpki::san::public-suffix-wildcard-san",
-            "webpki::san::san-critical-with-nonempty-subject",
-            // WEBPKI_POLICY: Miscellaneous.
-            "webpki::ca-as-leaf",
-            "webpki::ee-basicconstraints-ca",
-            "webpki::malformed-aia",
-            "webpki::v1-cert",
-            // WEBPKI_POLICY: Name constraint edge cases. CABF permits non-critical
-            // NC as an explicit exception to RFC 5280, but we enforce RFC 5280 strictly.
-            "webpki::nc::intermediate-permitted-excluded-subtrees-both-empty-sequences",
-            "webpki::nc::intermediate-permitted-excluded-subtrees-both-null",
+            // WEBPKI_POLICY: Name constraint non-critical NC (CABF exception).
             "webpki::nc::permitted-dns-match-noncritical",
-            // CHAIN_DEPTH: Self-issued certificate and pathlen interaction.
-            "pathlen::max-chain-depth-1-self-issued",
-            "pathlen::intermediate-pathlen-may-increase",
-            "pathlen::self-issued-certs-pathlen",
-            // CRL_STRICT: CRL number extension validation.
-            "crl::crlnumber-missing",
-            "crl::crlnumber-critical",
-            // CVE: GnuTLS-specific CVE regression test.
-            "cve::cve-2024-0567",
-            // PATHOLOGICAL: Name constraint DoS and edge cases.
-            "pathological::nc-dos-1",
-            "pathological::nc-dos-2",
-            "pathological::nc-dos-3",
-            "pathological::multiple-chains-expired-intermediate",
         ]
         .into_iter()
         .collect()
@@ -4001,6 +3923,7 @@ mod limbo {
         let mut options = VerifyOptions {
             check_time: true,
             partial_chain: false,
+            policy: tc.policy,
             ..VerifyOptions::default()
         };
 

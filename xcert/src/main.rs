@@ -737,6 +737,7 @@ fn main() -> Result<()> {
                 crl_ders,
                 crl_check_leaf: *crl_check || *crl_check_all,
                 crl_check_all: *crl_check_all,
+                policy: xcert_lib::VerifyPolicy::default(),
             };
 
             // Directory mode: verify all cert files in parallel
