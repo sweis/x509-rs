@@ -412,11 +412,12 @@ fn is_cert_file(path: &Path) -> bool {
 }
 
 /// Find all certificate files (.pem, .der, .crt, .cer) in a directory.
+/// Follows symlinks to include symlinked certificate files.
 fn find_cert_files(dir: &Path, recurse: bool) -> Vec<PathBuf> {
     let walker = if recurse {
-        walkdir::WalkDir::new(dir)
+        walkdir::WalkDir::new(dir).follow_links(true)
     } else {
-        walkdir::WalkDir::new(dir).max_depth(1)
+        walkdir::WalkDir::new(dir).max_depth(1).follow_links(true)
     };
     let mut files: Vec<PathBuf> = walker
         .into_iter()
@@ -1335,22 +1336,10 @@ fn run() -> Result<()> {
                         };
 
                         // If the certs don't form a chain (e.g. CA bundle),
-                        // verify each certificate individually.
-                        if !xcert_lib::is_certificate_chain(&certs_der) {
-                            return certs_der
-                                .iter()
-                                .enumerate()
-                                .map(|(i, cert_der)| {
-                                    let cert_label = format!("{}[{}]", label, i);
-                                    let result = xcert_lib::verify_chain_with_options(
-                                        std::slice::from_ref(cert_der),
-                                        &trust_store,
-                                        hostname.as_deref(),
-                                        &options,
-                                    );
-                                    verify_to_batch(cert_label, result)
-                                })
-                                .collect();
+                        // skip in directory mode to avoid duplicates with individual files.
+                        // Users who want to verify a bundle file directly can pass it explicitly.
+                        if !xcert_lib::is_certificate_chain(&certs_der) && certs_der.len() > 1 {
+                            return vec![];
                         }
 
                         // Normal chain verification
