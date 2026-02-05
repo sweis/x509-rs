@@ -60,16 +60,21 @@ pub fn oid_short_name(oid: &str) -> String {
     }
 }
 
-/// Detect whether input bytes are PEM-encoded.
+/// Find the byte offset of the first PEM header (`-----BEGIN`) in the input.
 ///
-/// Returns `true` if the input starts with `-----BEGIN` (after stripping
-/// leading whitespace).
+/// Returns `None` if no PEM header is found. This handles files that have
+/// comment lines or metadata before the first PEM block (e.g., macOS
+/// `/etc/ssl/cert.pem` starts with `# $OpenBSD: ...` comment lines).
+pub(crate) fn find_pem_start(input: &[u8]) -> Option<usize> {
+    input.windows(10).position(|w| w == b"-----BEGIN")
+}
+
+/// Detect whether input bytes contain PEM-encoded data.
+///
+/// Returns `true` if the input contains `-----BEGIN` anywhere, allowing
+/// for leading comments or metadata before the first PEM block.
 pub fn is_pem(input: &[u8]) -> bool {
-    input
-        .iter()
-        .skip_while(|b| b.is_ascii_whitespace())
-        .take(10)
-        .eq(b"-----BEGIN".iter())
+    find_pem_start(input).is_some()
 }
 
 /// Format an IPv6 address in OpenSSL-compatible expanded uppercase hex.

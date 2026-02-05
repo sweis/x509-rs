@@ -27,7 +27,15 @@ pub fn parse_cert(input: &[u8]) -> Result<CertificateInfo, XcertError> {
 
 /// Parse a certificate from PEM format.
 pub fn parse_pem(input: &[u8]) -> Result<CertificateInfo, XcertError> {
-    let (_, pem) = x509_parser::pem::parse_x509_pem(input)
+    // Skip any leading comments or metadata before the PEM block.
+    // Files like /etc/ssl/cert.pem may have comment lines before the
+    // first -----BEGIN CERTIFICATE----- marker.
+    let pem_input = match util::find_pem_start(input) {
+        Some(offset) => &input[offset..],
+        None => input,
+    };
+
+    let (_, pem) = x509_parser::pem::parse_x509_pem(pem_input)
         .map_err(|e| XcertError::PemError(format!("{}", e)))?;
 
     if pem.label != "CERTIFICATE"
