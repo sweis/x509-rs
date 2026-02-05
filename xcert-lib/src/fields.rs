@@ -64,9 +64,9 @@ impl Serialize for DistinguishedName {
 
         let mut state = serializer.serialize_map(Some(map.len()))?;
         for (k, values) in &map {
-            if values.len() == 1 {
+            if let [single] = values.as_slice() {
                 // Single value: serialize as string
-                state.serialize_entry(k, values[0])?;
+                state.serialize_entry(k, single)?;
             } else {
                 // Multiple values: serialize as array
                 state.serialize_entry(k, values)?;
