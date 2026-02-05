@@ -43,7 +43,7 @@ pub use crl::parse_pem_crl;
 pub use trust_store::{find_system_ca_bundle, TrustStore};
 
 // Re-export helpers that need to be used by is_self_issued check
-use helpers::is_self_issued;
+use helpers::{extract_serial_hex, extract_short_name, is_self_issued};
 
 // Re-export webpki check
 use webpki::check_webpki_policy;
@@ -61,22 +61,16 @@ pub struct VerificationResult {
 
 impl std::fmt::Display for VerificationResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Format: [short_name], [serial], [OK/FAIL], [optional reason]
+        if let Some(leaf) = self.chain.first() {
+            write!(f, "{}, {}, ", leaf.short_name, leaf.serial)?;
+        }
         if self.is_valid {
             write!(f, "OK")?;
-            if !self.chain.is_empty() {
-                write!(f, " (chain: ")?;
-                for (i, info) in self.chain.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " -> ")?;
-                    }
-                    write!(f, "{}", info.subject)?;
-                }
-                write!(f, ")")?;
-            }
         } else {
             write!(f, "FAIL")?;
-            for err in &self.errors {
-                write!(f, ": {}", err)?;
+            if !self.errors.is_empty() {
+                write!(f, ", {}", self.errors.join("; "))?;
             }
         }
         Ok(())
@@ -92,6 +86,10 @@ pub struct ChainCertInfo {
     pub subject: String,
     /// Issuer distinguished name.
     pub issuer: String,
+    /// Short human-readable name derived from CN, O, or OU.
+    pub short_name: String,
+    /// Serial number as colon-separated hex (machine-readable).
+    pub serial: String,
 }
 
 /// Verification policy that controls which validation rules are applied.
@@ -312,7 +310,7 @@ pub fn verify_chain_with_options(
         )));
     }
 
-    // Pre-compute subject and issuer strings for all certificates (#29).
+    // Pre-compute subject, issuer, short_name, and serial strings for all certificates (#29).
     let subjects: Vec<String> = parsed
         .iter()
         .map(|(_, x509)| crate::parser::build_dn(x509.subject()).to_oneline())
@@ -321,15 +319,22 @@ pub fn verify_chain_with_options(
         .iter()
         .map(|(_, x509)| crate::parser::build_dn(x509.issuer()).to_oneline())
         .collect();
-
-    let mut chain_info: Vec<ChainCertInfo> = subjects
+    let short_names: Vec<String> = parsed
         .iter()
-        .zip(issuers.iter())
-        .enumerate()
-        .map(|(i, (subject, issuer))| ChainCertInfo {
+        .map(|(_, x509)| extract_short_name(x509))
+        .collect();
+    let serials: Vec<String> = parsed
+        .iter()
+        .map(|(_, x509)| extract_serial_hex(x509))
+        .collect();
+
+    let mut chain_info: Vec<ChainCertInfo> = (0..parsed.len())
+        .map(|i| ChainCertInfo {
             depth: i,
-            subject: subject.clone(),
-            issuer: issuer.clone(),
+            subject: subjects[i].clone(),
+            issuer: issuers[i].clone(),
+            short_name: short_names[i].clone(),
+            serial: serials[i].clone(),
         })
         .collect();
 

@@ -114,6 +114,51 @@ pub(crate) fn extract_san_ips(cert: &X509Certificate) -> Vec<String> {
     ips
 }
 
+/// Extract a short human-readable identifier from a certificate.
+///
+/// Tries in order: CN, O, OU. Returns the first non-empty value found,
+/// or "Unknown" if none are present.
+pub(crate) fn extract_short_name(cert: &X509Certificate) -> String {
+    // Try CN first
+    if let Some(cn) = extract_cn(cert) {
+        return cn;
+    }
+
+    // Try O (Organization)
+    for rdn in cert.subject().iter() {
+        for attr in rdn.iter() {
+            if attr.attr_type().to_id_string() == oid::ORGANIZATION {
+                if let Ok(val) = attr.as_str() {
+                    return val.to_string();
+                }
+            }
+        }
+    }
+
+    // Try OU (Organizational Unit)
+    for rdn in cert.subject().iter() {
+        for attr in rdn.iter() {
+            if attr.attr_type().to_id_string() == oid::ORGANIZATIONAL_UNIT {
+                if let Ok(val) = attr.as_str() {
+                    return val.to_string();
+                }
+            }
+        }
+    }
+
+    "Unknown".to_string()
+}
+
+/// Extract the serial number from a certificate as a colon-separated hex string.
+pub(crate) fn extract_serial_hex(cert: &X509Certificate) -> String {
+    let serial_bytes = cert.serial.to_bytes_be();
+    serial_bytes
+        .iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 /// Check if an extension OID is one we recognize and process.
 /// RFC 5280 Section 4.2 requires that implementations reject certificates
 /// containing unrecognized critical extensions.

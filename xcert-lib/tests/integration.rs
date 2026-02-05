@@ -3225,14 +3225,16 @@ mod verify_options {
         let result = verify_chain(&chain, &store, None).expect("verification should not error");
         assert!(result.is_valid);
         let display = format!("{}", result);
+        // New format: [short_name], [serial], OK
         assert!(
-            display.starts_with("OK"),
-            "display should start with OK: {}",
+            display.contains(", OK"),
+            "display should contain OK: {}",
             display
         );
+        // Check that short_name and serial are present
         assert!(
-            display.contains("chain:"),
-            "display should show chain: {}",
+            display.contains("www.example.com"),
+            "display should show short name: {}",
             display
         );
     }
@@ -3247,9 +3249,10 @@ mod verify_options {
         let result = verify_chain(&chain, &store, None).expect("verification should not error");
         assert!(!result.is_valid);
         let display = format!("{}", result);
+        // New format: [short_name], [serial], FAIL, [reason]
         assert!(
-            display.starts_with("FAIL"),
-            "display should start with FAIL: {}",
+            display.contains(", FAIL"),
+            "display should contain FAIL: {}",
             display
         );
     }

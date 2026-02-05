@@ -6,8 +6,8 @@
 use super::constraints::check_name_constraints;
 use super::crl::check_crl_revocation;
 use super::helpers::{
-    extract_cn, extract_san_dns_names, is_known_extension, is_self_issued, verify_email,
-    verify_hostname, verify_ip,
+    extract_cn, extract_san_dns_names, extract_serial_hex, extract_short_name, is_known_extension,
+    is_self_issued, verify_email, verify_hostname, verify_ip,
 };
 use super::{ChainCertInfo, TrustStore, VerifyOptions, VerifyPolicy};
 use crate::oid;
@@ -429,6 +429,8 @@ pub(crate) fn verify_trust_anchoring(
                                 depth: parsed.len(),
                                 subject: crate::parser::build_dn(root_x509.subject()).to_oneline(),
                                 issuer: crate::parser::build_dn(root_x509.issuer()).to_oneline(),
+                                short_name: extract_short_name(&root_x509),
+                                serial: extract_serial_hex(&root_x509),
                             });
                             trusted_root_der = Some(root_der.clone());
                             trust_anchored = true;

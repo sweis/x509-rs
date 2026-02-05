@@ -419,6 +419,8 @@ fn verify_to_batch(
 }
 
 /// Print a single-file verification result (JSON, text valid, or text invalid).
+///
+/// Output format: `[filename]: [short identifier], [serial], [OK / FAIL], [optional reason]`
 fn print_verify_result(
     label: &str,
     result: &xcert_lib::VerificationResult,
