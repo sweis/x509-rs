@@ -2,8 +2,7 @@
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::panic,
-    clippy::indexing_slicing,
-    clippy::manual_is_multiple_of
+    clippy::indexing_slicing
 )]
 //! Integration tests for xcert-lib using generated test certificates.
 //!
@@ -2333,7 +2332,7 @@ mod reference_vectors {
     fn normalize_serial(openssl_serial: &str) -> String {
         let hex = openssl_serial.trim().to_ascii_uppercase();
         // Pad to even length
-        let hex = if !hex.len().is_multiple_of(2) {
+        let hex = if hex.len() % 2 != 0 {
             format!("0{}", hex)
         } else {
             hex

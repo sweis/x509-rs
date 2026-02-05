@@ -2,6 +2,7 @@
 name = "xcert-lib"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74"
 description = "Library for parsing and inspecting X.509 certificates"
 
 [dependencies]

@@ -17,7 +17,7 @@ features of `openssl x509`, with a simplified, modern CLI interface.
 ### Non-Goals
 - Certificate creation, signing, or modification
 - Trust store management
-- Full chain validation (use `openssl verify` or webpki for that)
+- Full chain validation (use `openssl verify` or webpki for that). Note: Chain verification is now implemented via the `verify` subcommand.
 - Private key handling
 
 ## 2. Architecture
@@ -81,7 +81,7 @@ xcert-rs/
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `x509-parser` | 0.16 | Core X.509 DER/PEM parsing |
+| `x509-parser` | 0.18 | Core X.509 DER/PEM parsing |
 | `sha2` | 0.10 | SHA-256/384/512 fingerprints |
 | `sha1` | 0.10 | SHA-1 fingerprints (legacy compat) |
 | `serde` | 1 | Serialization (with `derive` feature) |
@@ -284,6 +284,7 @@ to library functions:
 | `xcert field <F>` | `parse_cert()` + corresponding `CertificateInfo` method |
 | `xcert check <C>` | `parse_cert()` + `check_*()` |
 | `xcert convert` | `pem_to_der()` or `der_to_pem()` |
+| `xcert verify` | `verify_chain()` + chain building |
 
 ## 6. Input Format Detection
 

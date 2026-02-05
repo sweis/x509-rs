@@ -2,6 +2,7 @@
 name = "xcert"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74"
 description = "Command-line tool for inspecting X.509 certificates"
 
 [dependencies]

@@ -54,12 +54,12 @@ cargo install --path xcert
 cargo test
 ```
 
-There are 210 integration tests covering parsing, field extraction, extensions,
+There are 217 integration tests covering parsing, field extraction, extensions,
 fingerprints, checks, conversion, display, degenerate/malformed inputs,
 certificate chain verification, verify options (email, IP, time, purpose,
 depth, partial chain), Name Constraints, CRL revocation checking,
 cross-compatibility with external test vectors, and OpenSSL output format
-compatibility.
+compatibility. There are 240 total tests including pyca and zlint external vectors.
 
 ## Usage
 
@@ -385,7 +385,7 @@ xcert-rs/
       convert.rs      # PEM <-> DER conversion
       util.rs         # Shared encoding utilities
     tests/
-      integration.rs  # 155 integration tests
+      integration.rs  # 217 integration tests
   xcert/              # CLI binary crate
     src/main.rs       # clap-based CLI with subcommands
   fuzz/               # cargo-fuzz targets and corpus
