@@ -543,14 +543,7 @@ fn run() -> Result<()> {
                     } else {
                         cert.san_entries()
                             .iter()
-                            .map(|e| match e {
-                                xcert_lib::SanEntry::Dns(v) => format!("DNS:{}", v),
-                                xcert_lib::SanEntry::Email(v) => format!("email:{}", v),
-                                xcert_lib::SanEntry::Ip(v) => format!("IP Address:{}", v),
-                                xcert_lib::SanEntry::Uri(v) => format!("URI:{}", v),
-                                xcert_lib::SanEntry::DirName(v) => format!("DirName:{}", v),
-                                xcert_lib::SanEntry::Other(v) => format!("othername:{}", v),
-                            })
+                            .map(|e| e.to_string())
                             .collect::<Vec<_>>()
                             .join(", ")
                     }

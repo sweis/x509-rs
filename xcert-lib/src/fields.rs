@@ -151,6 +151,19 @@ pub enum SanEntry {
     Other(String),
 }
 
+impl std::fmt::Display for SanEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SanEntry::Dns(v) => write!(f, "DNS: {}", v),
+            SanEntry::Email(v) => write!(f, "Email: {}", v),
+            SanEntry::Ip(v) => write!(f, "IP: {}", v),
+            SanEntry::Uri(v) => write!(f, "URI: {}", v),
+            SanEntry::DirName(v) => write!(f, "DirName: {}", v),
+            SanEntry::Other(v) => write!(f, "Other: {}", v),
+        }
+    }
+}
+
 /// Authority Information Access entry.
 #[derive(Debug, Clone, Serialize)]
 pub struct AiaEntry {

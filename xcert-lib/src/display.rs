@@ -1,8 +1,6 @@
 //! Human-readable and JSON formatting of certificate information.
 
-use crate::fields::{
-    AiaEntry, CertificateInfo, DigestAlgorithm, Extension, ExtensionValue, SanEntry,
-};
+use crate::fields::{AiaEntry, CertificateInfo, DigestAlgorithm, Extension, ExtensionValue};
 use crate::XcertError;
 use std::fmt::Write;
 
@@ -99,26 +97,7 @@ fn format_extension(out: &mut String, ext: &Extension) {
         ExtensionValue::SubjectAltName(entries) => {
             let _ = writeln!(out, "    Subject Alternative Name:{}", critical_str);
             for entry in entries {
-                match entry {
-                    SanEntry::Dns(name) => {
-                        let _ = writeln!(out, "      DNS: {}", name);
-                    }
-                    SanEntry::Email(email) => {
-                        let _ = writeln!(out, "      Email: {}", email);
-                    }
-                    SanEntry::Ip(ip) => {
-                        let _ = writeln!(out, "      IP: {}", ip);
-                    }
-                    SanEntry::Uri(uri) => {
-                        let _ = writeln!(out, "      URI: {}", uri);
-                    }
-                    SanEntry::DirName(dn) => {
-                        let _ = writeln!(out, "      DirName: {}", dn);
-                    }
-                    SanEntry::Other(s) => {
-                        let _ = writeln!(out, "      Other: {}", s);
-                    }
-                }
+                let _ = writeln!(out, "      {}", entry);
             }
         }
         ExtensionValue::SubjectKeyIdentifier(hex) => {

@@ -480,15 +480,18 @@ fn extension_oid_to_name(oid: &str) -> String {
     }
 }
 
+/// Map uncommon EKU OIDs to human-readable names.
+///
+/// Only called for `eku.other` OIDs — the common OIDs (serverAuth, clientAuth,
+/// codeSigning, emailProtection, timeStamping, ocspSigning, anyEKU) are already
+/// handled by the boolean fields on `ExtendedKeyUsage`.
 fn eku_oid_to_name(oid: &str) -> String {
     match oid {
-        "1.3.6.1.5.5.7.3.1" => "TLS Web Server Authentication".into(),
-        "1.3.6.1.5.5.7.3.2" => "TLS Web Client Authentication".into(),
-        "1.3.6.1.5.5.7.3.3" => "Code Signing".into(),
-        "1.3.6.1.5.5.7.3.4" => "E-mail Protection".into(),
-        "1.3.6.1.5.5.7.3.8" => "Time Stamping".into(),
-        "1.3.6.1.5.5.7.3.9" => "OCSP Signing".into(),
-        "2.5.29.37.0" => "Any Extended Key Usage".into(),
+        "1.3.6.1.5.5.7.3.5" => "IPSec End System".into(),
+        "1.3.6.1.5.5.7.3.6" => "IPSec Tunnel".into(),
+        "1.3.6.1.5.5.7.3.7" => "IPSec User".into(),
+        "1.3.6.1.4.1.311.10.3.3" => "Microsoft Server Gated Crypto".into(),
+        "2.16.840.1.113730.4.1" => "Netscape Server Gated Crypto".into(),
         other => other.to_string(),
     }
 }

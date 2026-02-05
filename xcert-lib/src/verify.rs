@@ -207,16 +207,19 @@ impl TrustStore {
 
         // Try directory of individual certs
         let probe = openssl_probe::probe();
-        let mut dir_paths: Vec<Option<String>> = vec![std::env::var("SSL_CERT_DIR").ok()];
-        for probe_dir in probe.cert_dir {
-            dir_paths.push(Some(probe_dir.to_string_lossy().into_owned()));
-        }
-        for known in KNOWN_CA_DIR_PATHS {
-            dir_paths.push(Some((*known).into()));
-        }
+        let dir_candidates = std::env::var("SSL_CERT_DIR")
+            .ok()
+            .into_iter()
+            .chain(
+                probe
+                    .cert_dir
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned()),
+            )
+            .chain(KNOWN_CA_DIR_PATHS.iter().map(|s| (*s).to_string()));
 
-        for dir in dir_paths.iter().flatten() {
-            let dir_path = std::path::Path::new(dir);
+        for dir in dir_candidates {
+            let dir_path = std::path::Path::new(&dir);
             if let Ok(added) = store.add_pem_directory(dir_path) {
                 if added > 0 {
                     return Ok(store);
@@ -507,7 +510,7 @@ pub fn verify_chain_with_options(
     check_chain_critical_extensions(&parsed, &subjects, &mut errors);
     check_chain_duplicate_extensions(&parsed, &subjects, &mut errors);
     check_chain_name_constraint_placement(&parsed, &subjects, &mut errors);
-    check_chain_name_constraints(&parsed, &mut errors);
+    check_chain_name_constraints(&parsed, &subjects, &mut errors);
     check_chain_key_cert_sign(&parsed, &subjects, &mut errors);
     check_chain_signatures(&parsed, &subjects, &mut errors);
 
@@ -515,6 +518,7 @@ pub fn verify_chain_with_options(
     let trusted_root_der = verify_trust_anchoring(
         &parsed,
         &subjects,
+        &issuers,
         trust_store,
         options,
         &mut chain_info,
@@ -523,7 +527,7 @@ pub fn verify_chain_with_options(
 
     // Trusted root validation
     if let Some(ref root_der) = trusted_root_der {
-        check_trusted_root(root_der, &parsed, options, now_ts, &mut errors);
+        check_trusted_root(root_der, &parsed, &subjects, options, now_ts, &mut errors);
     }
 
     // Leaf certificate checks
@@ -692,7 +696,12 @@ fn check_chain_name_constraint_placement(
 }
 
 /// RFC 5280 Section 4.2.1.10: Check Name Constraints for CA certificates.
-fn check_chain_name_constraints(parsed: &[(&[u8], X509Certificate)], errors: &mut Vec<String>) {
+#[allow(clippy::indexing_slicing)] // subjects has same length as parsed
+fn check_chain_name_constraints(
+    parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
+    errors: &mut Vec<String>,
+) {
     for (ca_depth, (_, ca_cert)) in parsed.iter().enumerate().skip(1) {
         if let Ok(Some(nc_ext)) = ca_cert.name_constraints() {
             let nc = &nc_ext.value;
@@ -700,7 +709,13 @@ fn check_chain_name_constraints(parsed: &[(&[u8], X509Certificate)], errors: &mu
                 if child_depth >= ca_depth {
                     break;
                 }
-                let nc_errors = check_name_constraints(nc, child_cert, child_depth, ca_depth);
+                let nc_errors = check_name_constraints(
+                    nc,
+                    child_cert,
+                    &subjects[child_depth],
+                    child_depth,
+                    ca_depth,
+                );
                 errors.extend(nc_errors);
             }
         }
@@ -751,10 +766,11 @@ fn check_chain_signatures(
 /// Verify trust anchoring: find the root in the trust store.
 ///
 /// Returns `Some(root_der)` if a trusted root was found, `None` otherwise.
-#[allow(clippy::indexing_slicing)] // subjects has same length as parsed
+#[allow(clippy::indexing_slicing)] // subjects/issuers have same length as parsed
 fn verify_trust_anchoring(
     parsed: &[(&[u8], X509Certificate)],
     subjects: &[String],
+    issuers: &[String],
     trust_store: &TrustStore,
     options: &VerifyOptions,
     chain_info: &mut Vec<ChainCertInfo>,
@@ -813,10 +829,9 @@ fn verify_trust_anchoring(
             }
 
             if !trust_anchored {
-                let last_issuer = crate::parser::build_dn(last_x509.issuer()).to_oneline();
                 errors.push(format!(
                     "unable to find trusted root for issuer: {}",
-                    last_issuer
+                    issuers[last_idx]
                 ));
             }
         }
@@ -826,9 +841,11 @@ fn verify_trust_anchoring(
 }
 
 /// Validate the trusted root: time, critical extensions, Name Constraints.
+#[allow(clippy::indexing_slicing)] // subjects has same length as parsed
 fn check_trusted_root(
     root_der: &[u8],
     parsed: &[(&[u8], X509Certificate)],
+    subjects: &[String],
     options: &VerifyOptions,
     now_ts: i64,
     errors: &mut Vec<String>,
@@ -851,16 +868,14 @@ fn check_trusted_root(
     }
 
     for ext in root_x509.extensions() {
-        if ext.critical && !is_known_extension(ext.oid.to_id_string().as_str()) {
+        let oid_str = ext.oid.to_id_string();
+        if ext.critical && !is_known_extension(oid_str.as_str()) {
             errors.push(format!(
                 "trusted root ({}) has unrecognized critical extension {}",
                 root_subject, ext.oid
             ));
         }
-    }
-
-    for ext in root_x509.extensions() {
-        if ext.oid.to_id_string() == "2.5.29.30" && !ext.critical {
+        if oid_str == "2.5.29.30" && !ext.critical {
             errors.push(format!(
                 "trusted root ({}) has Name Constraints extension \
                  that is not marked critical",
@@ -871,7 +886,13 @@ fn check_trusted_root(
     if let Ok(Some(nc_ext)) = root_x509.name_constraints() {
         let nc = &nc_ext.value;
         for (child_depth, (_, child_cert)) in parsed.iter().enumerate() {
-            let nc_errors = check_name_constraints(nc, child_cert, child_depth, root_depth);
+            let nc_errors = check_name_constraints(
+                nc,
+                child_cert,
+                &subjects[child_depth],
+                child_depth,
+                root_depth,
+            );
             errors.extend(nc_errors);
         }
     }
@@ -1268,11 +1289,11 @@ fn is_known_extension(oid: &str) -> bool {
 fn check_name_constraints(
     nc: &x509_parser::extensions::NameConstraints,
     cert: &X509Certificate,
+    subject: &str,
     child_depth: usize,
     ca_depth: usize,
 ) -> Vec<String> {
     let mut errors = Vec::new();
-    let subject = crate::parser::build_dn(cert.subject()).to_oneline();
 
     // Collect all names from the certificate's SAN extension
     let mut dns_names: Vec<String> = Vec::new();
@@ -1543,7 +1564,7 @@ pub fn parse_pem_crl(input: &[u8]) -> Result<Vec<Vec<u8>>, XcertError> {
 ///
 /// Matches on the underlying numeric value of the `ReasonCode` newtype
 /// (which wraps a `u8`), per RFC 5280 Section 5.3.1.
-fn format_crl_reason(rc: &x509_parser::x509::ReasonCode) -> String {
+fn format_crl_reason(rc: &x509_parser::x509::ReasonCode) -> &'static str {
     match rc.0 {
         0 => "unspecified",
         1 => "keyCompromise",
@@ -1558,7 +1579,6 @@ fn format_crl_reason(rc: &x509_parser::x509::ReasonCode) -> String {
         10 => "aACompromise",
         _ => "unspecified",
     }
-    .into()
 }
 
 /// Check whether a certificate has been revoked according to the given CRLs.
@@ -1613,8 +1633,8 @@ pub fn check_crl_revocation(
                 let reason = revoked
                     .reason_code()
                     .map(|rc| format_crl_reason(&rc.1))
-                    .unwrap_or_else(|| "unspecified".to_string());
-                return Some(reason);
+                    .unwrap_or("unspecified");
+                return Some(reason.to_string());
             }
         }
     }
