@@ -387,8 +387,8 @@ Tests are organized at the library level using the generated test certificates:
 
 - **Unit tests** in each module for internal logic
 - **Integration tests** in `xcert-lib/tests/` using the test vectors in
-  `tests/certs/` and comparing against the reference outputs in
-  `tests/certs/reference/`
+  `testdata/certs/` and comparing against the reference outputs in
+  `testdata/certs/reference/`
 - **CLI tests** (future) using `assert_cmd` to test the binary end-to-end
 
 Test categories:

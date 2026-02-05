@@ -40,9 +40,9 @@ bash bench/openssl-baseline.sh
 ```bash
 cargo build --release
 
-time target/release/xcert show tests/certs/server.pem > /dev/null
-time target/release/xcert field fingerprint tests/certs/server.pem > /dev/null
-time target/release/xcert check host www.example.com tests/certs/server.pem
+time target/release/xcert show testdata/certs/server.pem > /dev/null
+time target/release/xcert field fingerprint testdata/certs/server.pem > /dev/null
+time target/release/xcert check host www.example.com testdata/certs/server.pem
 ```
 
 Detailed OpenSSL baseline data is in [`docs/performance-baseline.md`](docs/performance-baseline.md).

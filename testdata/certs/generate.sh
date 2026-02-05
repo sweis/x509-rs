@@ -9,7 +9,7 @@
 # All private keys are generated fresh and stored alongside the certificates
 # for reproducibility. These are TEST-ONLY keys with no security value.
 #
-# Usage: cd tests/certs && bash generate.sh
+# Usage: cd testdata/certs && bash generate.sh
 #
 set -euo pipefail
 

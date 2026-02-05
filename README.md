@@ -133,7 +133,25 @@ All commands support `--json` for machine-readable output. Bulk operations retur
 cargo test
 ```
 
-240 tests covering parsing, verification, checks, conversions, and compatibility with external test vectors.
+276 tests covering parsing, verification, checks, conversions, and compatibility with external test vectors.
+
+### External test vector suites
+
+Three git submodules provide additional test vectors from external projects. Tests skip gracefully when submodules are not initialized.
+
+```bash
+# Initialize all submodules
+git submodule update --init
+
+# Run tests (submodule tests now included)
+cargo test
+```
+
+| Submodule | Source | What it tests |
+|---|---|---|
+| `testdata/zlint` | [zmap/zlint](https://github.com/zmap/zlint) | 2000+ real-world and edge-case certificates |
+| `testdata/x509-limbo` | [C2SP/x509-limbo](https://github.com/C2SP/x509-limbo) | RFC 5280, WebPKI, and path-building verification vectors |
+| `testdata/pyca-cryptography` | [pyca/cryptography](https://github.com/pyca/cryptography) | Algorithm diversity (Ed25519, Ed448, RSA-PSS, DSA) and NIST PKITS suite |
 
 ## Fuzzing
 

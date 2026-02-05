@@ -1727,9 +1727,12 @@ mod tests {
 
     #[test]
     fn find_cert_files_finds_pem_and_der() {
-        let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/certs");
+        let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/certs");
         let files = find_cert_files(&certs_dir, false);
-        assert!(!files.is_empty(), "should find cert files in tests/certs");
+        assert!(
+            !files.is_empty(),
+            "should find cert files in testdata/certs"
+        );
         // All returned files should have cert extensions
         for f in &files {
             assert!(is_cert_file(f), "non-cert file returned: {}", f.display());
@@ -1738,7 +1741,7 @@ mod tests {
 
     #[test]
     fn find_cert_files_sorted() {
-        let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/certs");
+        let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/certs");
         let files = find_cert_files(&certs_dir, false);
         let mut sorted = files.clone();
         sorted.sort();
@@ -1747,7 +1750,7 @@ mod tests {
 
     #[test]
     fn find_cert_files_non_recursive_skips_subdirs() {
-        let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/certs");
+        let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/certs");
         let flat = find_cert_files(&certs_dir, false);
         // None of the flat results should be inside a subdirectory beyond certs/
         for f in &flat {
