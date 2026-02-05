@@ -226,11 +226,6 @@ impl CertificateInfo {
         &self.serial
     }
 
-    /// Return the serial number in compact hex format matching OpenSSL output (e.g., "1000").
-    pub fn serial_compact(&self) -> String {
-        self.serial.replace(':', "")
-    }
-
     /// Return the notBefore date as a string (OpenSSL format).
     pub fn not_before_string(&self) -> String {
         self.not_before.to_openssl()

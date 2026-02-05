@@ -71,6 +71,20 @@ pub fn is_pem(input: &[u8]) -> bool {
         .eq(b"-----BEGIN".iter())
 }
 
+/// Format an IPv6 address in OpenSSL-compatible expanded uppercase hex.
+///
+/// Each 16-bit segment is printed without leading zeros, separated by colons.
+/// Example: `"2606:2800:220:1:248:1893:25C8:1946"`.
+///
+/// This avoids `::` compression so the output matches OpenSSL's display format.
+pub fn format_ipv6_expanded(addr: &std::net::Ipv6Addr) -> String {
+    addr.segments()
+        .iter()
+        .map(|s| format!("{:X}", s))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 /// RFC 6125 hostname matching with wildcard support.
 ///
 /// Checks for exact match or wildcard match (e.g., `*.example.com` matches
@@ -95,4 +109,64 @@ pub fn hostname_matches(pattern: &str, hostname: &str) -> bool {
     }
 
     false
+}
+
+// ---------------------------------------------------------------------------
+// Shared certificate-name matching (used by both check and verify modules)
+// ---------------------------------------------------------------------------
+
+/// Match a hostname against a list of DNS SAN names with CN fallback.
+///
+/// Implements RFC 6125: SAN DNS names take priority; CN is only checked
+/// when no SAN DNS entries exist.
+pub fn verify_hostname_match(dns_names: &[String], cn: Option<&str>, hostname: &str) -> bool {
+    let hostname_lower = hostname.to_ascii_lowercase();
+
+    if !dns_names.is_empty() {
+        return dns_names
+            .iter()
+            .any(|pattern| hostname_matches(pattern, &hostname_lower));
+    }
+
+    if let Some(cn) = cn {
+        return hostname_matches(cn, &hostname_lower);
+    }
+
+    false
+}
+
+/// Match an email against a list of certificate email addresses.
+///
+/// Case-insensitive comparison per RFC 5280.
+pub fn verify_email_match(emails: &[String], target: &str) -> bool {
+    let target_lower = target.to_ascii_lowercase();
+    emails
+        .iter()
+        .any(|e| e.to_ascii_lowercase() == target_lower)
+}
+
+/// Match an IP address against a list of SAN IP strings.
+///
+/// Both sides are normalized so that equivalent representations (e.g.,
+/// `::1` vs `0:0:0:0:0:0:0:1`) compare equal.
+pub fn verify_ip_match(san_ips: &[String], target: &str) -> bool {
+    let normalized = normalize_ip(target);
+    san_ips
+        .iter()
+        .any(|san_ip| normalize_ip(san_ip) == normalized)
+}
+
+/// Normalize an IP address string for comparison.
+///
+/// IPv4 addresses are formatted via `Ipv4Addr::to_string()`.
+/// IPv6 addresses are formatted via [`format_ipv6_expanded`].
+/// Other strings are lowercased.
+pub fn normalize_ip(ip: &str) -> String {
+    if let Ok(addr) = ip.parse::<std::net::Ipv4Addr>() {
+        return addr.to_string();
+    }
+    if let Ok(addr) = ip.parse::<std::net::Ipv6Addr>() {
+        return format_ipv6_expanded(&addr);
+    }
+    ip.to_ascii_lowercase()
 }
