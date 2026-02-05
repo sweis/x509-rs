@@ -1,4 +1,4 @@
-# xcert
+# xcert-rs: Rust x509 Certificate Inspection Utility
 
 [![CI](https://github.com/sweis/xcert-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/sweis/xcert-rs/actions/workflows/ci.yml)
 
