@@ -22,22 +22,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use x509_parser::prelude::*;
 
 // Re-export chain building constants
-pub(crate) use chain::MAX_CHAIN_DEPTH;
 use chain::build_chain_dfs;
+pub(crate) use chain::MAX_CHAIN_DEPTH;
 
 // Re-export check functions
 use checks::{
     check_chain_basic_constraints, check_chain_critical_extensions,
     check_chain_duplicate_extensions, check_chain_key_cert_sign,
     check_chain_name_constraint_placement, check_chain_name_constraints,
-    check_chain_rfc5280_strict, check_chain_signatures, check_chain_time_validity,
-    check_crl_chain, check_crl_strict, check_leaf_email, check_leaf_hostname, check_leaf_ip,
-    check_leaf_purpose, check_trusted_root, verify_trust_anchoring,
+    check_chain_rfc5280_strict, check_chain_signatures, check_chain_time_validity, check_crl_chain,
+    check_crl_strict, check_leaf_email, check_leaf_hostname, check_leaf_ip, check_leaf_purpose,
+    check_trusted_root, verify_trust_anchoring,
 };
 
 // Re-export CRL functions
-pub use crl::parse_pem_crl;
 pub use crl::check_crl_revocation;
+pub use crl::parse_pem_crl;
 
 // Re-export trust store
 pub use trust_store::{find_system_ca_bundle, TrustStore};

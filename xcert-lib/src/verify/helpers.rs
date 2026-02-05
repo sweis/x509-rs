@@ -23,7 +23,11 @@ pub(crate) fn is_self_issued(cert: &X509Certificate) -> bool {
 /// Supports wildcard matching per RFC 6125.
 ///
 /// Delegates to [`util::verify_hostname_match`] (shared with `check_host`).
-pub(crate) fn verify_hostname(cert: &X509Certificate, hostname: &str, allow_cn_fallback: bool) -> bool {
+pub(crate) fn verify_hostname(
+    cert: &X509Certificate,
+    hostname: &str,
+    allow_cn_fallback: bool,
+) -> bool {
     let dns_names = extract_san_dns_names(cert);
     let cn = if allow_cn_fallback {
         extract_cn(cert)
