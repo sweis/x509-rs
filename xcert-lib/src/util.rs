@@ -1,5 +1,6 @@
 //! Shared encoding and matching utilities.
 
+use crate::oid;
 use base64::Engine;
 
 /// Format bytes as colon-separated uppercase hex (e.g., "AB:CD:EF").
@@ -41,20 +42,20 @@ pub fn base64_wrap(data: &[u8]) -> String {
 /// These match the names used by OpenSSL for distinguished name components.
 pub fn oid_short_name(oid: &str) -> String {
     match oid {
-        "2.5.4.3" => "CN".into(),
-        "2.5.4.4" => "SN".into(),
-        "2.5.4.5" => "serialNumber".into(),
-        "2.5.4.6" => "C".into(),
-        "2.5.4.7" => "L".into(),
-        "2.5.4.8" => "ST".into(),
-        "2.5.4.9" => "street".into(),
-        "2.5.4.10" => "O".into(),
-        "2.5.4.11" => "OU".into(),
-        "2.5.4.12" => "title".into(),
-        "2.5.4.17" => "postalCode".into(),
-        "2.5.4.42" => "GN".into(),
-        "1.2.840.113549.1.9.1" => "emailAddress".into(),
-        "0.9.2342.19200300.100.1.25" => "DC".into(),
+        oid::COMMON_NAME => "CN".into(),
+        oid::SURNAME => "SN".into(),
+        oid::SERIAL_NUMBER => "serialNumber".into(),
+        oid::COUNTRY => "C".into(),
+        oid::LOCALITY => "L".into(),
+        oid::STATE_OR_PROVINCE => "ST".into(),
+        oid::STREET_ADDRESS => "street".into(),
+        oid::ORGANIZATION => "O".into(),
+        oid::ORGANIZATIONAL_UNIT => "OU".into(),
+        oid::TITLE => "title".into(),
+        oid::POSTAL_CODE => "postalCode".into(),
+        oid::GIVEN_NAME => "GN".into(),
+        oid::EMAIL_ADDRESS => "emailAddress".into(),
+        oid::DOMAIN_COMPONENT => "DC".into(),
         other => other.to_string(),
     }
 }

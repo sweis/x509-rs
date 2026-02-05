@@ -7,6 +7,7 @@
 //! The system trust store location is discovered via `openssl-probe` and
 //! environment variables, matching OpenSSL's lookup behavior.
 
+use crate::oid;
 use crate::util;
 use crate::XcertError;
 use serde::Serialize;
@@ -139,13 +140,13 @@ impl Default for VerifyOptions {
 /// Matches OpenSSL's `-purpose` named values.
 pub fn resolve_purpose(name: &str) -> Option<&'static str> {
     match name {
-        "sslserver" => Some("1.3.6.1.5.5.7.3.1"),
-        "sslclient" => Some("1.3.6.1.5.5.7.3.2"),
-        "smimesign" | "smimeencrypt" => Some("1.3.6.1.5.5.7.3.4"),
-        "codesign" => Some("1.3.6.1.5.5.7.3.3"),
-        "timestampsign" => Some("1.3.6.1.5.5.7.3.8"),
-        "ocsphelper" => Some("1.3.6.1.5.5.7.3.9"),
-        "any" => Some("2.5.29.37.0"),
+        "sslserver" => Some(oid::EKU_SERVER_AUTH),
+        "sslclient" => Some(oid::EKU_CLIENT_AUTH),
+        "smimesign" | "smimeencrypt" => Some(oid::EKU_EMAIL_PROTECTION),
+        "codesign" => Some(oid::EKU_CODE_SIGNING),
+        "timestampsign" => Some(oid::EKU_TIME_STAMPING),
+        "ocsphelper" => Some(oid::EKU_OCSP_SIGNING),
+        "any" => Some(oid::EKU_ANY),
         _ => None,
     }
 }
@@ -676,7 +677,7 @@ fn check_chain_name_constraint_placement(
     for (i, (_, x509)) in parsed.iter().enumerate() {
         let is_leaf = i == 0;
         for ext in x509.extensions() {
-            if ext.oid.to_id_string() == "2.5.29.30" {
+            if ext.oid.to_id_string() == oid::EXT_NAME_CONSTRAINTS {
                 if is_leaf {
                     errors.push(format!(
                         "certificate at depth {} ({}) is an end-entity but contains \
@@ -875,7 +876,7 @@ fn check_trusted_root(
                 root_subject, ext.oid
             ));
         }
-        if oid_str == "2.5.29.30" && !ext.critical {
+        if oid_str == oid::EXT_NAME_CONSTRAINTS && !ext.critical {
             errors.push(format!(
                 "trusted root ({}) has Name Constraints extension \
                  that is not marked critical",
@@ -916,13 +917,13 @@ fn check_leaf_purpose(
         let eku_val = &eku.value;
         let has_eku = eku_val.any
             || match required_oid.as_str() {
-                "1.3.6.1.5.5.7.3.1" => eku_val.server_auth,
-                "1.3.6.1.5.5.7.3.2" => eku_val.client_auth,
-                "1.3.6.1.5.5.7.3.3" => eku_val.code_signing,
-                "1.3.6.1.5.5.7.3.4" => eku_val.email_protection,
-                "1.3.6.1.5.5.7.3.8" => eku_val.time_stamping,
-                "1.3.6.1.5.5.7.3.9" => eku_val.ocsp_signing,
-                "2.5.29.37.0" => true,
+                oid::EKU_SERVER_AUTH => eku_val.server_auth,
+                oid::EKU_CLIENT_AUTH => eku_val.client_auth,
+                oid::EKU_CODE_SIGNING => eku_val.code_signing,
+                oid::EKU_EMAIL_PROTECTION => eku_val.email_protection,
+                oid::EKU_TIME_STAMPING => eku_val.time_stamping,
+                oid::EKU_OCSP_SIGNING => eku_val.ocsp_signing,
+                oid::EKU_ANY => true,
                 _ => eku_val
                     .other
                     .iter()
@@ -1183,7 +1184,7 @@ fn extract_san_dns_names(cert: &X509Certificate) -> Vec<String> {
 fn extract_cn(cert: &X509Certificate) -> Option<String> {
     for rdn in cert.subject().iter() {
         for attr in rdn.iter() {
-            if attr.attr_type().to_id_string() == "2.5.4.3" {
+            if attr.attr_type().to_id_string() == oid::COMMON_NAME {
                 return attr.as_str().ok().map(|s| s.to_string());
             }
         }
@@ -1212,7 +1213,7 @@ fn extract_emails(cert: &X509Certificate) -> Vec<String> {
     }
     for rdn in cert.subject().iter() {
         for attr in rdn.iter() {
-            if attr.attr_type().to_id_string() == "1.2.840.113549.1.9.1" {
+            if attr.attr_type().to_id_string() == oid::EMAIL_ADDRESS {
                 if let Ok(val) = attr.as_str() {
                     emails.push(val.to_string());
                 }
@@ -1254,28 +1255,28 @@ fn is_known_extension(oid: &str) -> bool {
     matches!(
         oid,
         // RFC 5280 standard extensions
-        "2.5.29.14" // Subject Key Identifier
-        | "2.5.29.15" // Key Usage
-        | "2.5.29.17" // Subject Alternative Name
-        | "2.5.29.18" // Issuer Alternative Name
-        | "2.5.29.19" // Basic Constraints
-        | "2.5.29.30" // Name Constraints
-        | "2.5.29.31" // CRL Distribution Points
-        | "2.5.29.32" // Certificate Policies
-        | "2.5.29.33" // Policy Mappings
-        | "2.5.29.35" // Authority Key Identifier
-        | "2.5.29.36" // Policy Constraints
-        | "2.5.29.37" // Extended Key Usage
-        | "2.5.29.46" // Freshest CRL
-        | "2.5.29.54" // Inhibit Any Policy
+        oid::EXT_SUBJECT_KEY_ID
+        | oid::EXT_KEY_USAGE
+        | oid::EXT_SUBJECT_ALT_NAME
+        | oid::EXT_ISSUER_ALT_NAME
+        | oid::EXT_BASIC_CONSTRAINTS
+        | oid::EXT_NAME_CONSTRAINTS
+        | oid::EXT_CRL_DISTRIBUTION_POINTS
+        | oid::EXT_CERTIFICATE_POLICIES
+        | oid::EXT_POLICY_MAPPINGS
+        | oid::EXT_AUTHORITY_KEY_ID
+        | oid::EXT_POLICY_CONSTRAINTS
+        | oid::EXT_EXTENDED_KEY_USAGE
+        | oid::EXT_FRESHEST_CRL
+        | oid::EXT_INHIBIT_ANY_POLICY
         // Common extensions in practice
-        | "1.3.6.1.5.5.7.1.1"  // Authority Info Access (AIA)
-        | "1.3.6.1.5.5.7.1.11" // Subject Info Access (SIA)
-        | "1.3.6.1.5.5.7.1.12" // TLS Feature (OCSP Must-Staple)
-        | "1.3.6.1.4.1.11129.2.4.2" // SCT List (Certificate Transparency)
-        | "1.3.6.1.4.1.11129.2.4.3" // CT Poison (pre-certificate)
+        | oid::EXT_AUTHORITY_INFO_ACCESS
+        | oid::EXT_SUBJECT_INFO_ACCESS
+        | oid::EXT_TLS_FEATURE
+        | oid::EXT_SCT_LIST
+        | oid::EXT_CT_POISON
         // Netscape extensions (legacy, but still seen)
-        | "2.16.840.1.113730.1.1" // Netscape Cert Type
+        | oid::EXT_NETSCAPE_CERT_TYPE
     )
 }
 
@@ -1320,7 +1321,7 @@ fn check_name_constraints(
     // Also check subject emailAddress (OID 1.2.840.113549.1.9.1)
     for rdn in cert.subject().iter() {
         for attr in rdn.iter() {
-            if attr.attr_type().to_id_string() == "1.2.840.113549.1.9.1" {
+            if attr.attr_type().to_id_string() == oid::EMAIL_ADDRESS {
                 if let Ok(val) = attr.as_str() {
                     email_names.push(val.to_ascii_lowercase());
                 }

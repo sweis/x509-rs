@@ -4,6 +4,7 @@ use crate::fields::{
     AiaEntry, CertificateInfo, DateTime, DistinguishedName, Extension, ExtensionValue,
     PublicKeyInfo, SanEntry,
 };
+use crate::oid;
 use crate::util;
 use crate::XcertError;
 use x509_parser::prelude::*;
@@ -113,14 +114,14 @@ fn format_serial(raw: &[u8]) -> String {
 
 fn format_sig_algorithm(algo: &AlgorithmIdentifier) -> String {
     match algo.algorithm.to_id_string().as_str() {
-        "1.2.840.113549.1.1.5" => "sha1WithRSAEncryption".into(),
-        "1.2.840.113549.1.1.11" => "sha256WithRSAEncryption".into(),
-        "1.2.840.113549.1.1.12" => "sha384WithRSAEncryption".into(),
-        "1.2.840.113549.1.1.13" => "sha512WithRSAEncryption".into(),
-        "1.2.840.10045.4.3.2" => "ecdsa-with-SHA256".into(),
-        "1.2.840.10045.4.3.3" => "ecdsa-with-SHA384".into(),
-        "1.2.840.10045.4.3.4" => "ecdsa-with-SHA512".into(),
-        "1.3.101.112" => "Ed25519".into(),
+        oid::SHA1_WITH_RSA => "sha1WithRSAEncryption".into(),
+        oid::SHA256_WITH_RSA => "sha256WithRSAEncryption".into(),
+        oid::SHA384_WITH_RSA => "sha384WithRSAEncryption".into(),
+        oid::SHA512_WITH_RSA => "sha512WithRSAEncryption".into(),
+        oid::ECDSA_WITH_SHA256 => "ecdsa-with-SHA256".into(),
+        oid::ECDSA_WITH_SHA384 => "ecdsa-with-SHA384".into(),
+        oid::ECDSA_WITH_SHA512 => "ecdsa-with-SHA512".into(),
+        oid::ED25519 => "Ed25519".into(),
         other => other.to_string(),
     }
 }
@@ -161,14 +162,14 @@ fn build_public_key_info(spki: &SubjectPublicKeyInfo) -> Result<PublicKeyInfo, X
     let oid_str = spki.algorithm.algorithm.to_id_string();
 
     let (algorithm, key_size, curve, modulus, exponent) = match oid_str.as_str() {
-        "1.2.840.113549.1.1.1" => {
+        oid::RSA_ENCRYPTION => {
             if let Some((mod_hex, bits, exp)) = extract_rsa_params(&spki.subject_public_key.data) {
                 ("RSA".into(), Some(bits), None, Some(mod_hex), Some(exp))
             } else {
                 ("RSA".into(), None, None, None, None)
             }
         }
-        "1.2.840.10045.2.1" => {
+        oid::EC_PUBLIC_KEY => {
             let curve_name = extract_ec_curve(&spki.algorithm);
             let key_size = match curve_name.as_str() {
                 "P-256" => Some(256),
@@ -178,8 +179,8 @@ fn build_public_key_info(spki: &SubjectPublicKeyInfo) -> Result<PublicKeyInfo, X
             };
             ("EC".into(), key_size, Some(curve_name), None, None)
         }
-        "1.3.101.112" => ("Ed25519".into(), Some(256), None, None, None),
-        "1.3.101.113" => ("Ed448".into(), Some(448), None, None, None),
+        oid::ED25519 => ("Ed25519".into(), Some(256), None, None, None),
+        oid::ED448 => ("Ed448".into(), Some(448), None, None, None),
         _ => (oid_str, None, None, None, None),
     };
 
@@ -218,9 +219,9 @@ fn extract_ec_curve(algo: &AlgorithmIdentifier) -> String {
     if let Some(params) = &algo.parameters {
         if let Ok(oid) = params.as_oid() {
             return match oid.to_id_string().as_str() {
-                "1.2.840.10045.3.1.7" => "P-256".into(),
-                "1.3.132.0.34" => "P-384".into(),
-                "1.3.132.0.35" => "P-521".into(),
+                oid::CURVE_P256 => "P-256".into(),
+                oid::CURVE_P384 => "P-384".into(),
+                oid::CURVE_P521 => "P-521".into(),
                 other => other.to_string(),
             };
         }
@@ -410,8 +411,8 @@ fn build_extension(ext: &X509Extension) -> Result<Extension, XcertError> {
                 .iter()
                 .map(|desc| {
                     let method = match desc.access_method.to_id_string().as_str() {
-                        "1.3.6.1.5.5.7.48.1" => "OCSP".into(),
-                        "1.3.6.1.5.5.7.48.2" => "CA Issuers".into(),
+                        oid::ACCESS_OCSP => "OCSP".into(),
+                        oid::ACCESS_CA_ISSUERS => "CA Issuers".into(),
                         other => other.to_string(),
                     };
                     let location = format_general_name(&desc.access_location);
@@ -457,25 +458,25 @@ fn build_extension(ext: &X509Extension) -> Result<Extension, XcertError> {
     })
 }
 
-fn extension_oid_to_name(oid: &str) -> String {
-    match oid {
-        "2.5.29.14" => "Subject Key Identifier".into(),
-        "2.5.29.15" => "Key Usage".into(),
-        "2.5.29.17" => "Subject Alternative Name".into(),
-        "2.5.29.18" => "Issuer Alternative Name".into(),
-        "2.5.29.19" => "Basic Constraints".into(),
-        "2.5.29.30" => "Name Constraints".into(),
-        "2.5.29.31" => "CRL Distribution Points".into(),
-        "2.5.29.32" => "Certificate Policies".into(),
-        "2.5.29.33" => "Policy Mappings".into(),
-        "2.5.29.35" => "Authority Key Identifier".into(),
-        "2.5.29.36" => "Policy Constraints".into(),
-        "2.5.29.37" => "Extended Key Usage".into(),
-        "2.5.29.54" => "Inhibit Any-Policy".into(),
-        "1.3.6.1.5.5.7.1.1" => "Authority Information Access".into(),
-        "1.3.6.1.5.5.7.1.11" => "Subject Information Access".into(),
-        "2.16.840.1.113730.1.1" => "Netscape Cert Type".into(),
-        "2.16.840.1.113730.1.13" => "Netscape Comment".into(),
+fn extension_oid_to_name(oid_str: &str) -> String {
+    match oid_str {
+        oid::EXT_SUBJECT_KEY_ID => "Subject Key Identifier".into(),
+        oid::EXT_KEY_USAGE => "Key Usage".into(),
+        oid::EXT_SUBJECT_ALT_NAME => "Subject Alternative Name".into(),
+        oid::EXT_ISSUER_ALT_NAME => "Issuer Alternative Name".into(),
+        oid::EXT_BASIC_CONSTRAINTS => "Basic Constraints".into(),
+        oid::EXT_NAME_CONSTRAINTS => "Name Constraints".into(),
+        oid::EXT_CRL_DISTRIBUTION_POINTS => "CRL Distribution Points".into(),
+        oid::EXT_CERTIFICATE_POLICIES => "Certificate Policies".into(),
+        oid::EXT_POLICY_MAPPINGS => "Policy Mappings".into(),
+        oid::EXT_AUTHORITY_KEY_ID => "Authority Key Identifier".into(),
+        oid::EXT_POLICY_CONSTRAINTS => "Policy Constraints".into(),
+        oid::EXT_EXTENDED_KEY_USAGE => "Extended Key Usage".into(),
+        oid::EXT_INHIBIT_ANY_POLICY => "Inhibit Any-Policy".into(),
+        oid::EXT_AUTHORITY_INFO_ACCESS => "Authority Information Access".into(),
+        oid::EXT_SUBJECT_INFO_ACCESS => "Subject Information Access".into(),
+        oid::EXT_NETSCAPE_CERT_TYPE => "Netscape Cert Type".into(),
+        oid::EXT_NETSCAPE_COMMENT => "Netscape Comment".into(),
         other => other.to_string(),
     }
 }
@@ -485,13 +486,13 @@ fn extension_oid_to_name(oid: &str) -> String {
 /// Only called for `eku.other` OIDs — the common OIDs (serverAuth, clientAuth,
 /// codeSigning, emailProtection, timeStamping, ocspSigning, anyEKU) are already
 /// handled by the boolean fields on `ExtendedKeyUsage`.
-fn eku_oid_to_name(oid: &str) -> String {
-    match oid {
-        "1.3.6.1.5.5.7.3.5" => "IPSec End System".into(),
-        "1.3.6.1.5.5.7.3.6" => "IPSec Tunnel".into(),
-        "1.3.6.1.5.5.7.3.7" => "IPSec User".into(),
-        "1.3.6.1.4.1.311.10.3.3" => "Microsoft Server Gated Crypto".into(),
-        "2.16.840.1.113730.4.1" => "Netscape Server Gated Crypto".into(),
+fn eku_oid_to_name(oid_str: &str) -> String {
+    match oid_str {
+        oid::EKU_IPSEC_END_SYSTEM => "IPSec End System".into(),
+        oid::EKU_IPSEC_TUNNEL => "IPSec Tunnel".into(),
+        oid::EKU_IPSEC_USER => "IPSec User".into(),
+        oid::EKU_MS_SERVER_GATED_CRYPTO => "Microsoft Server Gated Crypto".into(),
+        oid::EKU_NS_SERVER_GATED_CRYPTO => "Netscape Server Gated Crypto".into(),
         other => other.to_string(),
     }
 }

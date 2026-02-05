@@ -9,6 +9,7 @@ mod convert;
 mod display;
 mod fields;
 mod fingerprint;
+pub mod oid;
 mod parser;
 mod util;
 pub mod verify;
