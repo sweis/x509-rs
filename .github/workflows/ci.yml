@@ -38,7 +38,7 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - '**/Cargo.toml'
-              - 'tests/**'
+              - 'testdata/**'
 
   test:
     name: Test
@@ -48,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: bash tests/certs/generate.sh
+      - run: bash testdata/certs/generate.sh
       - run: cargo test --workspace
 
   clippy:
