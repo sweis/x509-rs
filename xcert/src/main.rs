@@ -1729,7 +1729,10 @@ mod tests {
     fn find_cert_files_finds_pem_and_der() {
         let certs_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/certs");
         let files = find_cert_files(&certs_dir, false);
-        assert!(!files.is_empty(), "should find cert files in testdata/certs");
+        assert!(
+            !files.is_empty(),
+            "should find cert files in testdata/certs"
+        );
         // All returned files should have cert extensions
         for f in &files {
             assert!(is_cert_file(f), "non-cert file returned: {}", f.display());
