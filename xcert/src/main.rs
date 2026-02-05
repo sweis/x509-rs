@@ -470,6 +470,16 @@ struct CheckResult {
     passed: bool,
 }
 
+/// JSON output for verify batch results.
+#[derive(Serialize)]
+struct VerifyJsonResult {
+    valid: bool,
+    short_name: Option<String>,
+    serial: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    errors: Vec<String>,
+}
+
 /// Process certificate files in parallel and output JSON.
 ///
 /// Returns (json_output, failure_count).
@@ -915,8 +925,20 @@ fn run() -> Result<()> {
             }
 
             let output = match field {
-                FieldName::Subject => colors::string(&cert.subject_string()).to_string(),
-                FieldName::Issuer => colors::string(&cert.issuer_string()).to_string(),
+                FieldName::Subject => {
+                    if *json {
+                        serde_json::to_string_pretty(&cert.subject)?
+                    } else {
+                        colors::string(&cert.subject_string()).to_string()
+                    }
+                }
+                FieldName::Issuer => {
+                    if *json {
+                        serde_json::to_string_pretty(&cert.issuer)?
+                    } else {
+                        colors::string(&cert.issuer_string()).to_string()
+                    }
+                }
                 FieldName::Serial => colors::hex(cert.serial_hex()).to_string(),
                 FieldName::NotBefore => colors::date(&cert.not_before_string()).to_string(),
                 FieldName::NotAfter => colors::date(&cert.not_after_string()).to_string(),
@@ -1280,21 +1302,117 @@ fn run() -> Result<()> {
                             path.display()
                         );
                     }
-                    let failures = run_batch(&files, *failures_only, |f| {
-                        let label = f.display().to_string();
-                        let data = match std::fs::read(f) {
-                            Ok(d) => d,
-                            Err(e) => {
-                                return vec![BatchResult {
-                                    path: label,
-                                    pass: false,
-                                    detail: format!("FAIL (read error: {})", e),
-                                }]
+
+                    if *json {
+                        // JSON output mode
+                        let (output, failures) = run_batch_json(&files, |f| {
+                            let data = std::fs::read(f).map_err(|e| e.to_string())?;
+
+                            if let Some(untrusted_path) = untrusted {
+                                let leaf_der =
+                                    xcert_lib::pem_to_der(&data).map_err(|e| e.to_string())?;
+                                let untrusted_data = std::fs::read(untrusted_path)
+                                    .map_err(|e| format!("read untrusted: {}", e))?;
+                                let result = xcert_lib::verify_with_untrusted(
+                                    &leaf_der,
+                                    &untrusted_data,
+                                    &trust_store,
+                                    hostname.as_deref(),
+                                    &options,
+                                )
+                                .map_err(|e| e.to_string())?;
+                                return Ok(VerifyJsonResult {
+                                    valid: result.is_valid,
+                                    short_name: result.chain.first().map(|c| c.short_name.clone()),
+                                    serial: result.chain.first().map(|c| c.serial.clone()),
+                                    errors: result.errors.clone(),
+                                });
                             }
+
+                            let certs_der =
+                                xcert_lib::parse_pem_chain(&data).map_err(|e| e.to_string())?;
+
+                            // Skip bundles in directory mode
+                            if !xcert_lib::is_certificate_chain(&certs_der) && certs_der.len() > 1 {
+                                return Err("skipped: CA bundle".to_string());
+                            }
+
+                            let result = xcert_lib::verify_chain_with_options(
+                                &certs_der,
+                                &trust_store,
+                                hostname.as_deref(),
+                                &options,
+                            )
+                            .map_err(|e| e.to_string())?;
+
+                            Ok(VerifyJsonResult {
+                                valid: result.is_valid,
+                                short_name: result.chain.first().map(|c| c.short_name.clone()),
+                                serial: result.chain.first().map(|c| c.serial.clone()),
+                                errors: result.errors.clone(),
+                            })
+                        });
+                        // Filter out skipped bundles from JSON output
+                        let filtered_output = JsonBatchOutput {
+                            results: output
+                                .results
+                                .into_iter()
+                                .filter(|r| r.error.as_deref() != Some("skipped: CA bundle"))
+                                .collect(),
+                            summary: output.summary,
                         };
-                        if let Some(untrusted_path) = untrusted {
-                            let leaf_der = match xcert_lib::pem_to_der(&data) {
+                        println!("{}", serde_json::to_string_pretty(&filtered_output)?);
+                        if failures > 0 {
+                            std::process::exit(2);
+                        }
+                    } else {
+                        // Text output mode
+                        let failures = run_batch(&files, *failures_only, |f| {
+                            let label = f.display().to_string();
+                            let data = match std::fs::read(f) {
                                 Ok(d) => d,
+                                Err(e) => {
+                                    return vec![BatchResult {
+                                        path: label,
+                                        pass: false,
+                                        detail: format!("FAIL (read error: {})", e),
+                                    }]
+                                }
+                            };
+                            if let Some(untrusted_path) = untrusted {
+                                let leaf_der = match xcert_lib::pem_to_der(&data) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        return vec![BatchResult {
+                                            path: label,
+                                            pass: false,
+                                            detail: format!("FAIL (parse error: {})", e),
+                                        }]
+                                    }
+                                };
+                                let untrusted_data = match std::fs::read(untrusted_path) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        return vec![BatchResult {
+                                            path: label,
+                                            pass: false,
+                                            detail: format!("FAIL (read untrusted: {})", e),
+                                        }]
+                                    }
+                                };
+                                let result = xcert_lib::verify_with_untrusted(
+                                    &leaf_der,
+                                    &untrusted_data,
+                                    &trust_store,
+                                    hostname.as_deref(),
+                                    &options,
+                                );
+                                return vec![verify_to_batch(label, result)];
+                            }
+
+                            // Parse PEM and detect bundle vs chain
+                            let certs_der = match xcert_lib::parse_pem_chain(&data) {
+                                Ok(c) => c,
                                 Err(e) => {
                                     return vec![BatchResult {
                                         path: label,
@@ -1303,56 +1421,26 @@ fn run() -> Result<()> {
                                     }]
                                 }
                             };
-                            let untrusted_data = match std::fs::read(untrusted_path) {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    return vec![BatchResult {
-                                        path: label,
-                                        pass: false,
-                                        detail: format!("FAIL (read untrusted: {})", e),
-                                    }]
-                                }
-                            };
-                            let result = xcert_lib::verify_with_untrusted(
-                                &leaf_der,
-                                &untrusted_data,
+
+                            // If the certs don't form a chain (e.g. CA bundle),
+                            // skip in directory mode to avoid duplicates with individual files.
+                            // Users who want to verify a bundle file directly can pass it explicitly.
+                            if !xcert_lib::is_certificate_chain(&certs_der) && certs_der.len() > 1 {
+                                return vec![];
+                            }
+
+                            // Normal chain verification
+                            let result = xcert_lib::verify_chain_with_options(
+                                &certs_der,
                                 &trust_store,
                                 hostname.as_deref(),
                                 &options,
                             );
-                            return vec![verify_to_batch(label, result)];
+                            vec![verify_to_batch(label, result)]
+                        });
+                        if failures > 0 {
+                            std::process::exit(2);
                         }
-
-                        // Parse PEM and detect bundle vs chain
-                        let certs_der = match xcert_lib::parse_pem_chain(&data) {
-                            Ok(c) => c,
-                            Err(e) => {
-                                return vec![BatchResult {
-                                    path: label,
-                                    pass: false,
-                                    detail: format!("FAIL (parse error: {})", e),
-                                }]
-                            }
-                        };
-
-                        // If the certs don't form a chain (e.g. CA bundle),
-                        // skip in directory mode to avoid duplicates with individual files.
-                        // Users who want to verify a bundle file directly can pass it explicitly.
-                        if !xcert_lib::is_certificate_chain(&certs_der) && certs_der.len() > 1 {
-                            return vec![];
-                        }
-
-                        // Normal chain verification
-                        let result = xcert_lib::verify_chain_with_options(
-                            &certs_der,
-                            &trust_store,
-                            hostname.as_deref(),
-                            &options,
-                        );
-                        vec![verify_to_batch(label, result)]
-                    });
-                    if failures > 0 {
-                        std::process::exit(2);
                     }
                     return Ok(());
                 }

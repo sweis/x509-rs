@@ -1,6 +1,8 @@
 //! Certificate data types and field extraction.
 
+use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 /// Digest algorithm for fingerprint computation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,11 +44,36 @@ pub struct CertificateInfo {
 }
 
 /// Distinguished name with ordered components.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct DistinguishedName {
     /// Ordered list of (attribute_type, value) pairs.
     /// Attribute types use short names where known (e.g., "CN", "O", "C").
     pub components: Vec<(String, String)>,
+}
+
+impl Serialize for DistinguishedName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Group components by key, preserving order of first occurrence
+        let mut map: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for (k, v) in &self.components {
+            map.entry(k.as_str()).or_default().push(v.as_str());
+        }
+
+        let mut state = serializer.serialize_map(Some(map.len()))?;
+        for (k, values) in &map {
+            if let [single] = values.as_slice() {
+                // Single value: serialize as string
+                state.serialize_entry(k, single)?;
+            } else {
+                // Multiple values: serialize as array
+                state.serialize_entry(k, values)?;
+            }
+        }
+        state.end()
+    }
 }
 
 impl DistinguishedName {
